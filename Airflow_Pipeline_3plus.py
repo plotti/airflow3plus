@@ -8,6 +8,7 @@ import hashlib
 import Sensors_3plus
 
 from datetime import datetime, timedelta, timezone
+from shutil import copyfile
 
 from airflow import DAG
 from airflow.models import xcom
@@ -38,7 +39,6 @@ from airflow.contrib.hooks.ftp_hook import FTPHook
 
 # General file path on the local directory and on the remote server
 # Local Path:       /home/floosli/Documents/PIN_Data_Test/*/*
-#
 # Remote Path:      ftp://ftp.mpg-ftp.ch/PIN-Daten/*.pin with
 
 # Global variables used in the DAG
@@ -47,6 +47,7 @@ DAG_ID = 'dag_3plus'  # Set right Id for xcom pusher and puller otherwise the va
 REMOTE_PATH = '/PIN-Daten/'
 LOCAL_PATH = '/home/floosli/Documents/PIN_Data_Test/'
 SUFFIX = '.pin'
+# Sequence of the file is important for the execution of the algorithm
 REGULAR_FILE_LIST = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
 IRREGULAR_FILE_LIST = ['Station', 'CritCode', 'Crit']
 DAYS_IN_PAST = 10
@@ -54,6 +55,9 @@ DAYS_IN_PAST = 10
 FTP_CONN_ID = 'ftp_server_pin_data'
 # Fernet-Key for the ftp connection: yP-Y5bM5fRJoyuBPIP31cRZng4Ktk4hV3vNtBuzkSl4=
 SQL_ALCHEMY_CONN = 'sql_alchemy_conn'
+#
+regular_dates = []
+irregular_dates = []
 
 
 # Default arguments for the DAG dag_3plus
@@ -84,27 +88,62 @@ dag_3plus = DAG(dag_id=DAG_ID,
 # Important: If the function requires arguments, you need to add **kwargs and set provide_context = True in the
 # Operator settings.
 
+# Pull the xcom variables for the regular files from the database and store them locally in a global variable
+# for the duration of the execution of a task
+def extract_regular_dates():
+
+    puller = xcom.XCom
+    global regular_dates
+
+    for file in REGULAR_FILE_LIST:
+
+        updates = puller.get_many(key=file + '_date',
+                                  execution_date=datetime.now(timezone.utc),
+                                  dag_ids=DAG_ID,
+                                  include_prior_dates=True)
+        dates = []
+        for date in updates:
+            try:
+                val = json.loads(date.value)
+                dates.append(val)
+            except TypeError as e:  # TypeError if boolean is loaded
+                logging.info('Got %s, will continue as planed' % str(e))
+                continue
+
+        dates = set(dates)
+        regular_dates.append(dates)
+
+
+# Pull the xcom variables for the irregular files from the database
+def extract_irregular_dates():
+
+    puller = xcom.XCom
+    global irregular_dates
+
+    for file in IRREGULAR_FILE_LIST:
+
+        update = puller.get_one(key=file + '_bool',
+                                execution_date=datetime.now(timezone.utc),
+                                dag_id=DAG_ID,
+                                include_prior_dates=True)
+
+        irregular_dates.append(update)
+
+
 # Download all regular files at one at a time sequential from ftp server and save them in a temporary directory
 # The dates are pulled from Xcom variables and are pushed from the Sensor_Regular_Files
 def download_regular_files_from_ftp_server(remote_path, local_path, file_list, suffix='.pin',
                                            ftp_conn='ftp_default', **kwargs):
 
     conn = FTPHook(ftp_conn_id=ftp_conn)
-    puller = xcom.XCom
+    extract_regular_dates()
 
-    for file in file_list:
+    for file, r_dates in zip(file_list, regular_dates):
 
-        list_dates = puller.get_many(key=file + '_date',
-                                     execution_date=datetime.now(timezone.utc),
-                                     dag_ids=DAG_ID,
-                                     include_prior_dates=True)
+        for date_value in r_dates:
 
-        for date_value in list_dates:
-
-            present_date = json.loads(date_value.value)
-
-            remote_path_full = remote_path + file + '_' + str(present_date) + suffix
-            local_path_full = local_path + 'temp/' + file + '_' + str(present_date) + suffix
+            remote_path_full = remote_path + file + '_' + str(date_value) + suffix
+            local_path_full = local_path + 'temp/' + file + '_' + str(date_value) + suffix
 
             conn.retrieve_file(remote_full_path=remote_path_full, local_full_path_or_buffer=local_path_full)
             logging.info('Saved file at {}'.format(local_path_full))
@@ -116,14 +155,9 @@ def download_irregular_files_from_ftp_server(remote_path, local_path, file_list,
                                              ftp_conn='ftp_default', **kwargs):
 
     conn = FTPHook(ftp_conn_id=ftp_conn)
-    puller = xcom.XCom
+    extract_irregular_dates()
 
-    for file in file_list:
-
-        update = puller.get_one(key=file + '_bool',
-                                execution_date=datetime.now(timezone.utc),
-                                dag_id=DAG_ID,
-                                include_prior_dates=True)
+    for file, update in zip(file_list, irregular_dates):
 
         if not update:
             continue
@@ -136,26 +170,19 @@ def download_irregular_files_from_ftp_server(remote_path, local_path, file_list,
 
 
 # Check the hash of the newly downloaded files to ensure updates with an effect
-def check_hash_of_new_files(regular_file_list, irregular_file_list, suffix='.pin', **kwargs):
-
-    puller = xcom.XCom
+def check_hash_of_new_files():
 
     # Regular Files
     # Pull dates from the database which are to be updated with the respective file type
-    for r_file in regular_file_list:
+    # Compare the hash of the new and the old file to check for changes
+    global regular_dates
+    dates_to_update = set()
+    for r_file, r_dates in zip(REGULAR_FILE_LIST, regular_dates):
 
-        r_update = puller.get_many(key=r_file + '_date',
-                                   execution_date=datetime.now(timezone.utc),
-                                   dag_ids=DAG_ID,
-                                   include_prior_dates=True)
+        for present_date in r_dates:
 
-        # Compare the hash of the new and the old file to check for changes
-        for r_date in r_update:
-
-            present_date = json.loads(r_date.value)
-
-            r_temp_full_path = LOCAL_PATH + 'temp/' + r_file + '_' + str(present_date) + suffix
-            r_local_full_path = LOCAL_PATH + r_file + '/' + r_file + '_' + str(present_date) + suffix
+            r_temp_full_path = LOCAL_PATH + 'temp/' + r_file + '_' + str(present_date) + SUFFIX
+            r_local_full_path = LOCAL_PATH + r_file + '/' + r_file + '_' + str(present_date) + SUFFIX
 
             sha256_hash_1 = hashlib.sha256()
             with open(r_temp_full_path, 'rb') as f:
@@ -170,30 +197,27 @@ def check_hash_of_new_files(regular_file_list, irregular_file_list, suffix='.pin
 
             except (FileNotFoundError, OSError) as e:
                 print('No local file found %s, moving to update' % str(e))
-                os.rename(r_temp_full_path, r_local_full_path)
+                dates_to_update.update({present_date})
+                copyfile(r_temp_full_path, r_local_full_path)
                 continue
 
             if sha256_hash_1.hexdigest() == sha256_hash_2.hexdigest():
-                logging.info('Hashes havent changed in %s' % r_local_full_path)
-                os.remove(r_temp_full_path)
+                logging.info("Hashes haven't changed in %s" % r_local_full_path)
             else:
                 logging.info('The new file is different from %s, continue with update' % r_local_full_path)
-                os.rename(r_temp_full_path, r_local_full_path)
+                dates_to_update.update({present_date})
+                copyfile(r_temp_full_path, r_local_full_path)
 
     # Irregular files
     # Compare the hash of the new and the old file to check for changes
-    for ir_file in irregular_file_list:
-
-        ir_update = puller.get_one(key=ir_file + '_bool',
-                                   execution_date=datetime.now(timezone.utc),
-                                   dag_id=DAG_ID,
-                                   include_prior_dates=True)
+    global irregular_dates
+    for ir_file, ir_update in zip(IRREGULAR_FILE_LIST, irregular_dates):
 
         if not ir_update:
             continue
 
-        ir_temp_full_path = LOCAL_PATH + 'temp/' + ir_file + suffix
-        ir_local_full_path = LOCAL_PATH + ir_file + suffix
+        ir_temp_full_path = LOCAL_PATH + 'temp/' + ir_file + SUFFIX
+        ir_local_full_path = LOCAL_PATH + ir_file + SUFFIX
 
         sha256_hash_3 = hashlib.sha256()
         with open(ir_temp_full_path, 'rb') as f:
@@ -208,138 +232,63 @@ def check_hash_of_new_files(regular_file_list, irregular_file_list, suffix='.pin
 
         except (FileNotFoundError, OSError) as e:
             print('No local file found %s, moving to update' % str(e))
-            os.rename(ir_temp_full_path, ir_local_full_path)
+            copyfile(ir_temp_full_path, ir_local_full_path)
             continue
 
         if sha256_hash_3.hexdigest() == sha256_hash_4.hexdigest():
-            logging.info('Hashes havent changed in %s' % ir_local_full_path)
-            os.remove(ir_temp_full_path)
+            logging.info("Hashes haven't changed in %s" % ir_local_full_path)
         else:
             logging.info('The new file is different from %s, continue with update' % ir_local_full_path)
-            os.rename(ir_temp_full_path, ir_local_full_path)
+            copyfile(ir_temp_full_path, ir_local_full_path)
+
+    logging.info('Following dates are valid %s' % dates_to_update)
+    return dates_to_update
 
 
 # Data transformation and aggregation
-# Updated facts_table function for the airflow system
+# Updated both facts-tables based on the remaining dates computes after the hashes has been compared
 def transformation_facts_table():
 
-    # xcom pull the dates from the upated files and delete afterwards
-    puller = xcom.XCom
-    list_dates = puller.get_many(execution_date=datetime.now(timezone.utc),
-                                 dag_ids=DAG_ID,
-                                 include_prior_dates=True)
-    dates = []
-    for values in list_dates:
-        try:
-            val = json.loads(values.value)
-            dates.append(val)
-        except TypeError as e:  # TypeError if boolean is loaded
-            logging.info('Got %s, will continue as planed' % str(e))
-            continue
+    dates = set()
+
+    # Get the dates which has to be updated according to new and updated files
+    global regular_dates
+    global irregular_dates
+    extract_regular_dates()
+    extract_irregular_dates()
+
+    for file_dates in regular_dates:
+        dates = dates | file_dates
+
+    update = check_hash_of_new_files()
+    dates = dates.intersection(update)
 
     if not dates:
-        logging.info('No dates to update found, exiting code')
+        logging.info('No dates to update found, exiting execution')
         exit()
 
-    date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
+    logging.info('Starting with updating live facts-table')
+    pin_functions.update_live_facts_table(dates)
 
-    # Read the old file in and update dates with day from latest update, Singel-Day-Problem
-    df_old = pd.DataFrame()
-    for i in range(DAYS_IN_PAST):
-        date_old = (datetime.now() - timedelta(days=i - 1)).strftime('%Y%m%d')
-        if os.path.isfile(LOCAL_PATH + '20190101_%s_Live_DE_15_49_mG.csv' % date_old):
-            dates.append(int(date_old))
-            df_old = pd.read_csv(LOCAL_PATH + '20190101_%s_Live_DE_15_49_mG.csv' % date_old, parse_dates=date_cols,
-                                 dtype={'Description': str, 'Title': str, 'date': int})
+    logging.info('Continuing with updating time-shifted facts-table')
+    pin_functions.update_tsv_facts_table(dates)
 
-    # Remove duplicates
-    dates_to_update = set(dates)
-    logging.info('Following dates will be updated %s' % dates_to_update)
 
-    # Remove updated entries from the old file
-    for date_remove in dates_to_update:
-        df_old = df_old[df_old['date'] != date_remove]
+# Delete content of temp folder such that it returns to an empty state
+def delete_content_temp_dir():
 
-    stations = pin_functions.get_station_dict()
-    update = pd.DataFrame()
-    out_shows = []
-    out_viewers = []
-
-    # Create a new
-    for date in dates_to_update:
-
-        date = str(date)
-        date = datetime(year=int(date[0:4]), month=int(date[4:6]), day=int(date[6:8]))
-
+    path = LOCAL_PATH + 'temp/'
+    for file in os.listdir(path):
+        file_path = os.path.join(path, file)
         try:
-            logging.info('Updating %s' % date.strftime("%Y%m%d"))
-
-            # Import live-viewers
-            lv = pin_functions.get_live_viewers(agemax=49, agemin=15, date=date.strftime("%Y%m%d"))
-            lv = pd.concat([lv, pin_functions.get_live_viewers(agemax=49, agemin=15,
-                                                               date=(date + timedelta(days=1)).strftime("%Y%m%d"))],
-                           axis=0, ignore_index=False)
-            lv["station"] = lv["StationId"].map(stations)
-            lv = lv[['StartTime', 'EndTime', 'H_P', 'Weights', 'station', 'Kanton']]
-            lv['Weights'] = lv['H_P'].map(pin_functions.get_weight_dict((date.strftime("%Y%m%d"))))
-
-            # Import Broadcasting Schedule
-            sched = pin_functions.get_brc(date.strftime("%Y%m%d"), (date + timedelta(days=1)).strftime("%Y%m%d"))
-            sched["station"] = sched["ChannelCode"].map(stations).astype(str)
-            sched = sched[['Date', 'Title', 'StartTime', 'EndTime', 'BrdCstId', 'Description', 'Duration', 'station']]
-
-            # Map both together and append to a list
-            viewers, shows = pin_functions.map_viewers(sched, lv)
-            out_shows.append(shows)
-            out_viewers.append(viewers)
-
-            # Concatenate to a dataframe which will be concatenated to the old file
-            df_new = pin_functions.df_to_disk(out_viewers, out_shows, date.strftime("%Y%m%d"))
-            update = pd.concat([update, df_new], axis=0, ignore_index=False, sort=True)
-
-        # If following day is not available, handle it here with computing just the single day for now
-        except FileNotFoundError as e:
-            print("Problems with %s, no consecutive file found %s" % (date, str(e)))
-
-            lv = pin_functions.get_live_viewers(agemax=49, agemin=15, date=date.strftime("%Y%m%d"))
-            lv["station"] = lv["StationId"].map(stations)
-            lv = lv[['StartTime', 'EndTime', 'H_P', 'Weights', 'station', 'Kanton']]
-            lv['Weights'] = lv['H_P'].map(pin_functions.get_weight_dict((date.strftime("%Y%m%d"))))
-
-            sched = pin_functions.single_brc(date.strftime("%Y%m%d"))
-            sched["station"] = sched["ChannelCode"].map(stations).astype(str)
-            sched = sched[['Date', 'Title', 'StartTime', 'EndTime', 'BrdCstId', 'Description', 'Duration', 'station']]
-
-            viewers, shows = pin_functions.map_viewers(sched, lv)
-            out_shows.append(shows)
-            out_viewers.append(viewers)
-
-            df_new = pin_functions.df_to_disk(out_viewers, out_shows, date.strftime("%Y%m%d"))
-            update = pd.concat([update, df_new], axis=0, ignore_index=False, sort=True)
-
-    logging.info('Created updated entries')
-
-    # Concatenate update with old file
-    df_updated = pd.concat([df_old, update], axis=0, ignore_index=False)
-    df_updated['date'] = pd.to_numeric(df_updated['date'], downcast='integer')
-    df_updated.to_csv(f'{LOCAL_PATH}20190101_{df_updated["date"].max()}_Live_DE_15_49_mG.csv', index=False)
-
-    # Delete redundant files from directory
-    newest = False
-    for i in range(DAYS_IN_PAST):
-        date = (datetime.now() - timedelta(days=i - 1)).strftime('%Y%m%d')
-        if os.path.isfile(LOCAL_PATH + '20190101_%s_Live_DE_15_49_mG.csv' % date):
-            if newest:
-                os.remove((LOCAL_PATH + '20190101_%s_Live_DE_15_49_mG.csv' % date))
-            else:
-                newest = True
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+        except Exception as e:
+            logging.info(e)
 
 
-# Supported Version
 # Sensors and Tasks to update and download files
-# TODO parameters for production and logic
 # Observation of regular files
-# The Sensor definition is in an accompanied file called Sensors_3plus.py
 Sensor_Regular_Files = Sensors_3plus.SensorRegularFiles(
     task_id='Sensor_regular_files',
     server_path=REMOTE_PATH,
@@ -371,11 +320,12 @@ Task_Download_Regular_Files = PythonOperator(
         },
     retries=5,
     retry_delay=timedelta(seconds=5),
-    execution_timeout=timedelta(minutes=1),
+    execution_timeout=timedelta(minutes=2),
+    priority_weight=2,
     dag=dag_3plus
 )
 
-# Observe and download Station, CritCode, Crit files
+# Observe and download the irregular files Station, CritCode, Crit
 # The Sensor is also defined in a separate file Sensors_3plus.py
 Sensor_Irregular_Files = Sensors_3plus.SensorIrregularFiles(
     task_id='Sensor_irregular_files',
@@ -408,38 +358,23 @@ Task_Download_Irregular_Files = PythonOperator(
     retries=5,
     retry_delay=timedelta(seconds=5),
     execution_timeout=timedelta(minutes=1),
+    priority_weight=2,
     dag=dag_3plus
 )
 
 
-# Compare the hashes of the new downloaded files with the already existing files to determine
-# if the file has significantly changed
-Task_Compare_Hashes = PythonOperator(
-    task_id='Compare_hashes',
-    provide_context=True,
-    python_callable=check_hash_of_new_files,
-    op_kwargs={
-        'regular_file_list': REGULAR_FILE_LIST,
-        'irregular_file_list': IRREGULAR_FILE_LIST,
-        'suffix': SUFFIX
-    },
-    retries=5,
-    retry_delay=timedelta(seconds=5),
-    execution_timeout=timedelta(minutes=3),
-    trigger_rule='one_success',
-    dag=dag_3plus
-)
-
-# Operator to update the FactsTable
+# Compares also hashes to check if the file really has to be updated with the check_hashes function
+# eventually updates the facts table with the remaining dates which have to be updated
 Task_Update_Facts_Table = PythonOperator(
     task_id='Update_facts_table',
     provide_context=False,
     python_callable=transformation_facts_table,
-    retries=5,
+    retries=3,
     retry_delay=timedelta(seconds=5),
-    execution_timeout=timedelta(minutes=15),
+    execution_timeout=timedelta(minutes=40),
     dag=dag_3plus
 )
+
 
 # Delete all the xcom variables from the sqlite database
 # The deletion of the Xcom has to be done on the default DB for configuration or changing the db
@@ -453,12 +388,20 @@ Task_Delete_Xcom_Variables = SqliteOperator(
     dag=dag_3plus
 )
 
+# Delete the content of the temp dir for clean execution and no remaining files
+Task_Delete_Content_temp_dir = PythonOperator(
+    task_id='Delete_content_temp_dir',
+    provide_context=False,
+    python_callable=delete_content_temp_dir,
+    retries=5,
+    retry_delay=timedelta(seconds=5),
+    execution_timeout=timedelta(minutes=1),
+    dag=dag_3plus
+)
+
 # Task Scheduling for Retrieving data and Transforming them to the facts table.
-# Scheduling is not allowed to contain any circles
+# Scheduling is not allowed to contain any circles or repetitions of the same task
 # Schedule of Tasks:
-
-Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Compare_Hashes
-Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Compare_Hashes
-Task_Compare_Hashes >> Task_Update_Facts_Table >> Task_Delete_Xcom_Variables
-
-# transformation_facts_table()
+Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Update_Facts_Table
+Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Update_Facts_Table
+Task_Update_Facts_Table >> Task_Delete_Xcom_Variables >> Task_Delete_Content_temp_dir

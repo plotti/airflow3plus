@@ -55,7 +55,6 @@ class SensorRegularFiles(BaseSensorOperator):
     def poke(self, context):
 
         pusher = xcom.XCom
-
         update = False
 
         with self._create_hook() as hook:
