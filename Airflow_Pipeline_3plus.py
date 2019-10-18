@@ -1,5 +1,4 @@
 import logging
-import pandas as pd
 import pin_func_exp as pin_functions
 import json
 import os
@@ -15,8 +14,10 @@ from airflow.models import xcom
 from airflow.operators.sqlite_operator import SqliteOperator
 from airflow.operators.python_operator import PythonOperator
 from airflow.contrib.hooks.ftp_hook import FTPHook
+from airflow.hooks.base_hook import BaseHook
+from airflow.contrib.operators.slack_webhook_operator import SlackWebhookOperator
 
-
+# Used airflow version for development 1.10.5
 # A scheduling system based on the Airflow library. We'd like to update locally saved files daily and
 # generate enriched reports and tables based on the new entries.
 # The 3plus_dag is the defined DAG in which all the task are unraveled and scheduled.
@@ -26,10 +27,15 @@ from airflow.contrib.hooks.ftp_hook import FTPHook
 # How to start the airflow process:
 # 1. Start the airflow scheduler with the command: airflow scheduler
 # optional*. Start the airflow webserver to observe the progress of the DAG with: airflow webserver
+
 # All the configurations can be made through the command line and the GUI is not required but is very useful for
 # the application. All commands can be found in the airflow documentation
-# Start the DAG which should be processed with the command: airflow unpause dag_id
+
+# 2. Start the DAG which should be processed with the command: airflow un-pause dag_id
 # To trigger a run outside of schedule: airflow trigger_dag dag_id
+
+# The handling of the webserver should be self explanatory, some exploratory actions might be useful
+# to get used to the GUI
 
 # Access credentials to the remote ftp-server from mediapuls
 # wget -nc ftp://ftp.mpg-ftp.ch/PIN-Daten/*.pin' --ftp-user=3plus@mpg-ftp.ch --ftp-password=cJGQNd0d
@@ -55,38 +61,72 @@ DAYS_IN_PAST = 10
 FTP_CONN_ID = 'ftp_server_pin_data'
 # Fernet-Key for the ftp connection: yP-Y5bM5fRJoyuBPIP31cRZng4Ktk4hV3vNtBuzkSl4=
 SQL_ALCHEMY_CONN = 'sql_alchemy_conn'
-#
+# Slack connection ID
+SLACK_CONN_ID = 'slack'
+# Password slack: /T1JBVG25S/BNWRSJB99/z4Jua0GiOFfJPo303pSQQB76
+# The slack alert app is managed over the official slack API, settings and additional apps can be added there
+# Global dates variable will stay the same value throughout a task iteration
 regular_dates = []
 irregular_dates = []
 
 
+# Alerts if the DAG fails to execute
+def fail_slack_alert(context):
+
+    slack_webhook_token = BaseHook.get_connection(SLACK_CONN_ID).password
+    slack_msg = """
+            :red_circle: Task Failed. 
+            *Task*: {task}  
+            *Dag*: {dag} 
+            *Execution Time*: {exec_date}  
+            *Log Url*: {log_url} 
+            """.format(
+            task=context.get('task_instance').task_id,
+            dag=context.get('task_instance').dag_id,
+            ti=context.get('task_instance'),
+            exec_date=context.get('execution_date'),
+            log_url=context.get('task_instance').log_url,
+        )
+
+    failed_alert = SlackWebhookOperator(
+        task_id='Slack_failure_alert',
+        http_conn_id='slack',
+        webhook_token=slack_webhook_token,
+        message=slack_msg,
+        username='AirflowAlert')
+
+    return failed_alert.execute(context=context)
+
+
 # Default arguments for the DAG dag_3plus
-# TODO adjust arguments for production
 default_args = {
     'owner': '3plus',
     'depends_on_past': False,
     'email': ['floosli@3plus.tv'],
     'email_on_failure': False,
-    'email_on_retry': False
+    'email_on_retry': False,
+    'on_failure_callback': fail_slack_alert
     }
 
-# DAG Definition and its preset settings
+
+# DAG Definition and various setting influencing the workflow of the DAG
 dag_3plus = DAG(dag_id=DAG_ID,
                 description='DAG used to automate the PIN data gathering of 3plus and to update modified files',
                 schedule_interval=timedelta(days=1),
-                start_date=datetime(2019, 9, 23, 10),
+                start_date=datetime(year=2019, month=10, day=15, hour=12),
                 end_date=None,
                 default_args=default_args,
                 concurrency=2,
-                max_active_runs=4,
+                max_active_runs=3,
                 dagrun_timeout=timedelta(hours=4),
-                catchup=False)
+                catchup=False
+                )
 
 
 # Functions for transformation, enriching and downloading data in the tasks further below
 # These functions are executed by PythonOperators and have to be callable
-# Important: If the function requires arguments, you need to add **kwargs and set provide_context = True in the
-# Operator settings.
+# Important: If the callable function requires arguments, you need to add **kwargs and
+# set provide_context = True in the Operator settings.
 
 # Pull the xcom variables for the regular files from the database and store them locally in a global variable
 # for the duration of the execution of a task
@@ -101,12 +141,14 @@ def extract_regular_dates():
                                   execution_date=datetime.now(timezone.utc),
                                   dag_ids=DAG_ID,
                                   include_prior_dates=True)
+
         dates = []
         for date in updates:
+
             try:
                 val = json.loads(date.value)
                 dates.append(val)
-            except TypeError as e:  # TypeError if boolean is loaded
+            except TypeError as e:
                 logging.info('Got %s, will continue as planed' % str(e))
                 continue
 
@@ -196,7 +238,7 @@ def check_hash_of_new_files():
                         sha256_hash_2.update(byte_block)
 
             except (FileNotFoundError, OSError) as e:
-                print('No local file found %s, moving to update' % str(e))
+                logging.info('No local file found %s, moving to update' % str(e))
                 dates_to_update.update({present_date})
                 copyfile(r_temp_full_path, r_local_full_path)
                 continue
@@ -231,7 +273,7 @@ def check_hash_of_new_files():
                     sha256_hash_4.update(byte_block)
 
         except (FileNotFoundError, OSError) as e:
-            print('No local file found %s, moving to update' % str(e))
+            logging.info('No local file found %s, moving to update' % str(e))
             copyfile(ir_temp_full_path, ir_local_full_path)
             continue
 
@@ -241,7 +283,7 @@ def check_hash_of_new_files():
             logging.info('The new file is different from %s, continue with update' % ir_local_full_path)
             copyfile(ir_temp_full_path, ir_local_full_path)
 
-    logging.info('Following dates are valid %s' % dates_to_update)
+    logging.info('Following dates changed %s' % dates_to_update)
     return dates_to_update
 
 
@@ -263,10 +305,6 @@ def transformation_facts_table():
     update = check_hash_of_new_files()
     dates = dates.intersection(update)
 
-    if not dates:
-        logging.info('No dates to update found, exiting execution')
-        exit()
-
     logging.info('Starting with updating live facts-table')
     pin_functions.update_live_facts_table(dates)
 
@@ -287,8 +325,10 @@ def delete_content_temp_dir():
             logging.info(e)
 
 
-# Sensors and Tasks to update and download files
-# Observation of regular files
+# Sensors and Tasks to update and download files from the ftp server
+# The logic under which the tasks operate is defined in the python operations above or in the accompanied
+# Sensor_3plus.py file
+# Sensor to observate the creation and the modification time of regular files
 Sensor_Regular_Files = Sensors_3plus.SensorRegularFiles(
     task_id='Sensor_regular_files',
     server_path=REMOTE_PATH,
@@ -306,7 +346,7 @@ Sensor_Regular_Files = Sensors_3plus.SensorRegularFiles(
     dag=dag_3plus
 )
 
-# Download regular files, calls a Python function further up
+# Download regular files to a temporary directory before continuing with the update
 Task_Download_Regular_Files = PythonOperator(
     task_id='Download_regular_files',
     provide_context=True,
@@ -325,8 +365,7 @@ Task_Download_Regular_Files = PythonOperator(
     dag=dag_3plus
 )
 
-# Observe and download the irregular files Station, CritCode, Crit
-# The Sensor is also defined in a separate file Sensors_3plus.py
+# Sensor the creation and modification time of the irregular files Station, CritCode, Crit
 Sensor_Irregular_Files = Sensors_3plus.SensorIrregularFiles(
     task_id='Sensor_irregular_files',
     server_path=REMOTE_PATH,
@@ -343,7 +382,7 @@ Sensor_Irregular_Files = Sensors_3plus.SensorIrregularFiles(
     dag=dag_3plus
 )
 
-# Download irregular files, also calls a function further up for the execution
+# Download irregular files to a temporary directory before moving to further update
 Task_Download_Irregular_Files = PythonOperator(
     task_id='Download_irregular_files',
     provide_context=True,
@@ -364,14 +403,15 @@ Task_Download_Irregular_Files = PythonOperator(
 
 
 # Compares also hashes to check if the file really has to be updated with the check_hashes function
-# eventually updates the facts table with the remaining dates which have to be updated
+# eventually updates the facts table with the remaining dates which have been determined to be new
 Task_Update_Facts_Table = PythonOperator(
     task_id='Update_facts_table',
     provide_context=False,
     python_callable=transformation_facts_table,
     retries=3,
     retry_delay=timedelta(seconds=5),
-    execution_timeout=timedelta(minutes=40),
+    execution_timeout=timedelta(hours=1, minutes=20),
+    priority_weight=1,
     dag=dag_3plus
 )
 
@@ -380,6 +420,8 @@ Task_Update_Facts_Table = PythonOperator(
 # The deletion of the Xcom has to be done on the default DB for configuration or changing the db
 # consult the airflow.cfg file for configuration of the database.
 # Also, the existing DB and connections should be viewable in the Airflow-GUI.
+# The connection has been secured with a Fernet Key through the apache-airflow[crypto] package for modification,
+# please consult the official documentation of said package
 Task_Delete_Xcom_Variables = SqliteOperator(
     task_id='Delete_xcom',
     sql="delete from xcom where dag_id='dag_3plus'",
@@ -388,7 +430,7 @@ Task_Delete_Xcom_Variables = SqliteOperator(
     dag=dag_3plus
 )
 
-# Delete the content of the temp dir for clean execution and no remaining files
+# Delete the content of the temp dir for a rounded execution and no remaining files in future iteration
 Task_Delete_Content_temp_dir = PythonOperator(
     task_id='Delete_content_temp_dir',
     provide_context=False,
@@ -399,8 +441,10 @@ Task_Delete_Content_temp_dir = PythonOperator(
     dag=dag_3plus
 )
 
+
 # Task Scheduling for Retrieving data and Transforming them to the facts table.
 # Scheduling is not allowed to contain any circles or repetitions of the same task
+# A graphical view of the DAG is given in the GUI
 # Schedule of Tasks:
 Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Update_Facts_Table
 Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Update_Facts_Table
