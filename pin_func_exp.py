@@ -2,14 +2,17 @@ import datetime
 import pandas as pd
 import logging
 import os
+import Airflow_variables
 
 from datetime import timedelta, datetime
 from collections import Counter
 
 
+Airflow_var = Airflow_variables.AirflowVariables()
 # Some variable to influence the computation of the facts tables
-local_path = '/home/floosli/Documents/PIN_Data/'
-days_in_past = 10
+local_path = Airflow_var.local_path
+days_in_year = Airflow_var.days_in_year
+TSV_DAYS = Airflow_var.days_tsv
 
 
 #########################################################
@@ -18,10 +21,10 @@ days_in_past = 10
 def get_kanton_dict(date):
     """
     Returns viewer's Kanton on a given date
-    :param date: Day of interest
+    :param date: Day of interest as string
     :return: Dict of the viewers kanton
     """
-    with open(f'{local_path}SocDem_{date}.pin', 'r', encoding='latin-1') as f:
+    with open(f'{local_path}SocDem/SocDem_{date}.pin', 'r', encoding='latin-1') as f:
         df_socdem = pd.read_csv(f, dtype='int32', usecols=['SampleId', 'Person', 'SocDemVal5'])
 
     df_socdem['H_P'] = df_socdem['SampleId'].astype(str) + "_" + df_socdem['Person'].astype(str)
@@ -47,7 +50,7 @@ def get_weight_dict(date):
     :param date: Day of interest
     :return: Dictionary of the viewers Id and the respective weight
     """
-    with open(f'{local_path}Weight_{date}.pin', 'r', encoding='latin-1') as f:
+    with open(f'{local_path}Weight/Weight_{date}.pin', 'r', encoding='latin-1') as f:
         df_wei = pd.read_csv(f)
 
     df_wei['H_P'] = df_wei['SampledIdRep'].astype(str) + "_" + df_wei['PersonNr'].astype(str)
@@ -66,9 +69,9 @@ def get_weight_dict_ovn(date):
     weight_dict = {}
     date = datetime.strptime(date, '%Y%m%d')
 
-    for i in range(8):
+    for i in range(TSV_DAYS):
 
-        with open(f'{local_path}Weight_{(date-timedelta(days=i)).strftime("%Y%m%d")}.pin',
+        with open(f'{local_path}Weight/Weight_{(date-timedelta(days=i)).strftime("%Y%m%d")}.pin',
                   'r', encoding='latin-1') as f:
             df_wei = pd.read_csv(f)
 
@@ -86,7 +89,7 @@ def get_lang_dict(date):
     :param date: Day of interest
     :return: Dictionary of the spoken language of each viewer
     """
-    with open(f'{local_path}SocDem_{date}.pin', 'r', encoding='latin-1') as f:
+    with open(f'{local_path}SocDem/SocDem_{date}.pin', 'r', encoding='latin-1') as f:
         df_socdem = pd.read_csv(f, dtype='int32', usecols=['SampleId', 'Person', 'SocDemVal4'])
 
     df_socdem['H_P'] = df_socdem['SampleId'].astype(str) + "_" + df_socdem['Person'].astype(str)
@@ -101,7 +104,7 @@ def get_age_dict(date):
     :param date: Day of interest
     :return: A dictionary of the age of each viewer
     """
-    with open(f'{local_path}SocDem_{date}.pin', 'r', encoding='latin-1') as f:
+    with open(f'{local_path}SocDem/SocDem_{date}.pin', 'r', encoding='latin-1') as f:
         df_socdem = pd.read_csv(f, dtype='int32', usecols=['SampleId', 'Person', 'SocDemVal1'])
 
     df_socdem['H_P'] = df_socdem['SampleId'].astype(str) + "_" + df_socdem['Person'].astype(str)
@@ -119,7 +122,7 @@ def get_brc(date):
     :param date: Day of interst
     :return: pd.Dataframe of the broadcast schedule of the day
     """
-    with open(f'{local_path}BrdCst_{date}.pin', 'r', encoding='latin-1') as f:
+    with open(f'{local_path}BrdCst/BrdCst_{date}.pin', 'r', encoding='latin-1') as f:
         brc = pd.read_csv(f, dtype={'Date': 'object', 'StartTime': 'object',
                                     'ChannelCode': 'int'})
 
@@ -159,7 +162,7 @@ def get_live_viewers(date, agemin, agemax):
     :param agemax: Maximum age of the viewer, for filtering of the group of interest
     :return: All live viewers interesting for our facts table
     """
-    with open(f'{local_path}UsageLive_{date}.pin', 'r', encoding='latin-1') as f:
+    with open(f'{local_path}UsageLive/UsageLive_{date}.pin', 'r', encoding='latin-1') as f:
         df_usagelive = pd.read_csv(f, dtype={'HouseholdId': 'object', 'IndividualId': 'object',
                                              'EndTime': 'object', 'StartTime': 'object'})
     # Filters only on live viewers
@@ -278,7 +281,7 @@ def get_tsv_viewers(date, agemin, agemax):
     date_cols = ['UsageDate', 'RecordingDate']
     time_cols = ['ViewingStartTime', 'ViewingTime', 'RecordingStartTime']
 
-    with open(f'{local_path}UsageTimeShifted_{date}.pin', 'r', encoding='latin-1') as f:
+    with open(f'{local_path}UsageTimeShifted/UsageTimeShifted_{date}.pin', 'r', encoding='latin-1') as f:
         df = pd.read_csv(f, dtype={**{c: 'object' for c in date_cols},
                                    **{c: 'object' for c in time_cols}})
 
@@ -398,23 +401,31 @@ def update_tsv_facts_table(dates):
 
     # Read the old file in and update dates with day from latest update
     df_old = pd.DataFrame()
-    for i in range(days_in_past*2):
+    for i in range(days_in_year):
         date_old = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+        if date_old == year:
+            break
         if os.path.isfile(local_path + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (year, date_old)):
             df_old = pd.read_csv(local_path + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (year, date_old),
-                                 parse_dates=delayed_date_cols, dtype={'Description': str, 'Title': str, 'date': int})
-
-    # Check if older entries exist of files which are present, otherwise update them
-    for k in range(days_in_past):
-        date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
-        if not df_old['date'].astype(str).str.contains(date).any():
-            if date == year:
-                dates.update([int(date)])
-                break
-            dates.update([int(date)])
+                                 parse_dates=delayed_date_cols, dtype={'Description': str, 'H_P': str,
+                                                                       'HouseholdId': int, 'IndividualId': int,
+                                                                       'Kanton': int, 'Platform': int, 'StationId': int,
+                                                                       'Title': str, 'TvSet': int, 'Weights': float,
+                                                                       'UsageDate': int, 'ViewingActivity': int,
+                                                                       'age': int, 'broadcast_id': int, 'date': int,
+                                                                       'duration': int, 'program_duration': int,
+                                                                       'station': str})
+            break
 
     # Remove updated entries from the old file
     if not df_old.empty:
+        # Check if older entries exist of files which are present, otherwise update them
+        for k in range(days_in_year):
+            date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
+            if date == year:
+                break
+            if date not in df_old['date'].values:
+                dates.update([int(date)])
         for date_remove in dates:
             df_old = df_old[df_old['date'] != date_remove]
 
@@ -439,7 +450,7 @@ def update_tsv_facts_table(dates):
 
             # Import Schedule
             list_sched = pd.DataFrame()
-            for step in range(8):
+            for step in range(TSV_DAYS):
                 sched = get_brc((date - timedelta(days=step)).strftime("%Y%m%d"))
                 sched["station"] = sched["ChannelCode"].map(stations).astype(str)
                 sched = sched[['Date', 'Title', 'StartTime', 'EndTime',
@@ -473,8 +484,10 @@ def update_tsv_facts_table(dates):
 
     # Delete redundant files from directory
     newest = False
-    for i in range(days_in_past*2):
+    for i in range(days_in_year):
         date = (datetime.now() - timedelta(days=i - 1)).strftime('%Y%m%d')
+        if date == year:
+            break
         if os.path.isfile(local_path + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (year, date)):
             if newest:
                 os.remove((local_path + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (year, date)))
@@ -620,24 +633,28 @@ def update_live_facts_table(dates):
     year = str(year) + '0101'
 
     # Read the old file in and update dates with day from latest update 20190101_%s_Live_DE_15_49_mG
+
     df_old = pd.DataFrame()
-    for i in range(days_in_past*2):
+    for i in range(days_in_year):
         date_old = (datetime.now() - timedelta(days=i - 1)).strftime('%Y%m%d')
+        if date_old == year:
+            break
         if os.path.isfile(local_path + '%s_%s_Live_DE_15_49_mG.csv' % (year, date_old)):
             df_old = pd.read_csv(local_path + '%s_%s_Live_DE_15_49_mG.csv' % (year, date_old), parse_dates=date_cols,
-                                 dtype={'Description': str, 'Title': str, 'date': int})
-
-    # Check if older entries exist, otherwise update them
-    for k in range(days_in_past):
-        date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
-        if not df_old['date'].astype(str).str.contains(date).any():
-            if date == year:
-                dates.update([int(date)])
-                break
-            dates.update([int(date)])
+                                 dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
+                                        'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
+                                        'station': str})
+            break
 
     # Remove updated entries from the old file
     if not df_old.empty:
+        # Check if older entries exist, otherwise update them
+        for k in range(days_in_year):
+            date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
+            if date == year:
+                break
+            if date not in df_old['date'].values:
+                dates.update([int(date)])
         for date_remove in dates:
             df_old = df_old[df_old['date'] != date_remove]
 
@@ -689,8 +706,10 @@ def update_live_facts_table(dates):
 
     # Delete redundant files from directory
     newest = False
-    for i in range(days_in_past*2):
+    for i in range(days_in_year):
         date = (datetime.now() - timedelta(days=i - 1)).strftime('%Y%m%d')
+        if date == year:
+            break
         if os.path.isfile(local_path + '%s_%s_Live_DE_15_49_mG.csv' % (year, date)):
             if newest:
                 os.remove((local_path + '%s_%s_Live_DE_15_49_mG.csv' % (year, date)))
@@ -710,7 +729,7 @@ def add_individual_ratings(df):
     :return: Facts table with added Rating
     """
     df = df.copy()
-    df['individual_Rt-T'] = df['duration'] * df['Weights'] / df['program_duration']
+    df['individual_Rt-T_live'] = df['duration'] * df['Weights'] / df['program_duration']
 
     return df
 
@@ -725,17 +744,17 @@ def add_individual_ratings_ovn(df):
     """
     offset_index = (df['show_endtime'] > df['RecordingEndTime']).astype(int)
     df['duration'] += offset_index
-    df['individual_Rt-T'] = df['duration'] * df['Weights'] / df['program_duration']
+    df['individual_Rt-T_tsv'] = df['duration'] * df['Weights'] / df['program_duration']
 
     return df
 
 
-def compute_live_rt(path, station, path_sol):
+def compute_live_rt(path, station, path_comp_sol):
     """
     Computes and saves ratings for the live facts table
     :param path: Path to the live facts table
     :param station: Station on which the ratings should be computed for
-    :param path_sol: Path where to save the resulting file
+    :param path_comp_sol: Path where to save the resulting file
     :return: None
     """
 
@@ -745,17 +764,17 @@ def compute_live_rt(path, station, path_sol):
 
     df_2019_live = add_individual_ratings(df_2019_live)
     df_2019_live = df_2019_live[df_2019_live['station'] == station]
-    df_2019_live = df_2019_live.groupby(['broadcast_id', 'date'])[['individual_Rt-T', 'duration']].sum()
+    df_2019_live = df_2019_live.groupby(['broadcast_id', 'date'])[['individual_Rt-T_live', 'duration']].sum()
 
-    df_2019_live.to_csv(path_sol + 'live_rt_T_table')
+    df_2019_live.to_csv(path_comp_sol + 'live_rt_T_table')
 
 
-def compute_tsv_rt(path, station, path_sol):
+def compute_tsv_rt(path, station, path_comp_sol):
     """
     Computes the rating for the time-shifted facts table
     :param path: Path to the time-shifted facts table
     :param station: Channel of which the ratings should be computed for
-    :param path_sol: Path where to save the resulting file
+    :param path_comp_sol: Path where to save the resulting file
     :return: None
     """
 
@@ -768,4 +787,48 @@ def compute_tsv_rt(path, station, path_sol):
     df_2019_tsv = df_2019_tsv[df_2019_tsv['station'] == station]
     df_2019_tsv = df_2019_tsv.groupby(['broadcast_id', 'RecordingDate'])[['individual_Rt-T']].sum()
 
-    df_2019_tsv.to_csv(path_sol + 'tsv_rt_T_table')
+    df_2019_tsv.to_csv(path_comp_sol + 'tsv_rt_T_table')
+
+
+def verify_live_table(path_comp_sol, path_infosys_path, comparison_path):
+    """
+    Verify the result from our live facts table by comparing it with the data from infosys
+    :param path_comp_sol: Path to our computed ratings
+    :param path_infosys_path: Path to our infosys table
+    :param comparison_path: Path to where we save the comparison between both values
+    :return: None
+    """
+    comp_sol = pd.read_csv(path_comp_sol)
+    infosys_sol = pd.read_excel(path_infosys_path, names=[1, 2, 3, 4, 5, 6, 7, 8, 9, 'broadcast_id',
+                                                          'individual_Rt-T_live', 'individual_Rt-T_tsv',
+                                                          13, 14, 15, 16, 17, 18])
+    infosys_sol = infosys_sol.iloc[3:]
+
+    sol = pd.merge(infosys_sol, comp_sol, on='broadcast_id', how='inner', suffixes=["_x", "_y"])
+
+    sol['difference_live'] = sol['individual_Rt-T_live_x'] - sol['individual_Rt-T_live_y']
+    sol = sol.drop(columns=[1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18])
+
+    sol.to_csv(comparison_path)
+
+
+def verify_tsv_table(path_comp_sol, path_infosys_path, comparison_path):
+    """
+    Verify the result from our tsv facts table by comparing it with the data from infosys
+    :param path_comp_sol: Path to our computed ratings
+    :param path_infosys_path: Path to our infosys table
+    :param comparison_path: Path to where we save the comparison between both values
+    :return: None
+    """
+    comp_sol = pd.read_csv(path_comp_sol)
+    infosys_sol = pd.read_excel(path_infosys_path, names=[1, 2, 3, 4, 5, 6, 7, 8, 9, 'broadcast_id',
+                                                          'individual_Rt-T_live', 'individual_Rt-T_tsv',
+                                                          13, 14, 15, 16, 17, 18])
+    infosys_sol = infosys_sol.iloc[3:]
+
+    sol = pd.merge(infosys_sol, comp_sol, on='broadcast_id', how='inner', suffixes=["_x", "_y"])
+
+    sol['difference_tsv'] = sol['individual_Rt-T_tsv_x'] - sol['individual_Rt-T_tsv_y']
+    sol = sol.drop(columns=[1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18])
+
+    sol.to_csv(comparison_path)

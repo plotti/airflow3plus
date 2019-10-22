@@ -5,6 +5,7 @@ import os
 import hashlib
 
 import Sensors_3plus
+import Airflow_variables
 
 from datetime import datetime, timedelta, timezone
 from shutil import copyfile
@@ -16,63 +17,86 @@ from airflow.operators.python_operator import PythonOperator
 from airflow.contrib.hooks.ftp_hook import FTPHook
 from airflow.hooks.base_hook import BaseHook
 from airflow.contrib.operators.slack_webhook_operator import SlackWebhookOperator
+"""
+Used airflow version for development 1.10.5
+A scheduling system based on the Airflow library. We'd like to update locally saved files daily and
+generate enriched reports and tables based on the new entries.
+The 3plus_dag is the defined DAG in which all the task are unraveled and scheduled.
+Most Python_functions used in the PythonOperators are defined in the accompanied file pin_functions.py
+for clearer maintainability add additional functions in the previously mentioned file.
 
-# Used airflow version for development 1.10.5
-# A scheduling system based on the Airflow library. We'd like to update locally saved files daily and
-# generate enriched reports and tables based on the new entries.
-# The 3plus_dag is the defined DAG in which all the task are unraveled and scheduled.
-# Most Python_functions used in the PythonOperators are defined in the accompanied file pin_functions.py
-# for clearer maintainability add additional functions in the previously mentioned file.
+How to start the airflow process:
+1. Start the airflow scheduler with the command: airflow scheduler
+optional*. Start the airflow webserver to observe the progress of the DAG with: airflow webserver
 
-# How to start the airflow process:
-# 1. Start the airflow scheduler with the command: airflow scheduler
-# optional*. Start the airflow webserver to observe the progress of the DAG with: airflow webserver
+All the configurations can be made through the command line and the GUI is not required but is very useful for
+the application. All commands can be found in the airflow documentation
 
-# All the configurations can be made through the command line and the GUI is not required but is very useful for
-# the application. All commands can be found in the airflow documentation
+2. Start the DAG which should be processed with the command: airflow un-pause dag_id
+To trigger a run outside of schedule: airflow trigger_dag dag_id
 
-# 2. Start the DAG which should be processed with the command: airflow un-pause dag_id
-# To trigger a run outside of schedule: airflow trigger_dag dag_id
+The handling of the webserver should be self explanatory, some exploratory actions might be useful
+to get used to the GUI. Connections can be defined and modified and other useful operations
 
-# The handling of the webserver should be self explanatory, some exploratory actions might be useful
-# to get used to the GUI
+Access credentials to the remote ftp-server from mediapuls
+wget -nc ftp://ftp.mpg-ftp.ch/PIN-Daten/*.pin' --ftp-user=3plus@mpg-ftp.ch --ftp-password=cJGQNd0d
+host = ftp.mpg-ftp.ch,
+user = 3plus@mpg-ftp.ch,
+password = cJGQNd0d
 
-# Access credentials to the remote ftp-server from mediapuls
-# wget -nc ftp://ftp.mpg-ftp.ch/PIN-Daten/*.pin' --ftp-user=3plus@mpg-ftp.ch --ftp-password=cJGQNd0d
-# host = ftp.mpg-ftp.ch,
-# user = 3plus@mpg-ftp.ch,
-# password = cJGQNd0d
+Many variables for path, ranges etc can be found in the Airflow_variables class.
 
-# General file path on the local directory and on the remote server
-# Local Path:       /home/floosli/Documents/PIN_Data_Test/*/*
-# Remote Path:      ftp://ftp.mpg-ftp.ch/PIN-Daten/*.pin with
+The slack alert app is managed over the official slack API, settings and additional apps can be added there
+pls have a look at this blogpost to recreate the implementation 
+https://medium.com/datareply/integrating-slack-alerts-in-airflow-c9dcd155105
+Current Password slack: /T1JBVG25S/BNWRSJB99/z4Jua0GiOFfJPo303pSQQB76
 
+The FTP-connection is secured with a fernet-key, according to the implementation from airflow[crypt] package
+Current Fernet-Key for the ftp connection: yP-Y5bM5fRJoyuBPIP31cRZng4Ktk4hV3vNtBuzkSl4=
+
+Currently the xcoim variables are stored on a hosted sql_alchemy db. Have a look at 
+the airflow.cfg file for configuration of the database.
+
+The Schedule at the bottom of the file shows how the task are executed after each other, it is not allowed to contain 
+any circles. If you have task defined but not in the schedule they will still be executed as a single instance so
+you have to comment them out or delete them if this behaviour is not desired
+"""
+Airflow_var = Airflow_variables.AirflowVariables()
 # Global variables used in the DAG
-DAG_ID = 'dag_3plus'  # Set right Id for xcom pusher and puller otherwise the variables can't be found, Important at
+DAG_ID = 'dag_3plus'
 # the Sensor and respective Function
-REMOTE_PATH = '/PIN-Daten/'
-LOCAL_PATH = '/home/floosli/Documents/PIN_Data_Test/'
-SUFFIX = '.pin'
+REMOTE_PATH = Airflow_var.remote_path
+LOCAL_PATH = Airflow_var.local_path
+SUFFIX = Airflow_var.suffix
 # Sequence of the file is important for the execution of the algorithm
-REGULAR_FILE_LIST = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
-IRREGULAR_FILE_LIST = ['Station', 'CritCode', 'Crit']
-DAYS_IN_PAST = 10
+REGULAR_FILE_LIST = Airflow_var.regular_file_list
+IRREGULAR_FILE_LIST = Airflow_var.irregular_file_list
+SENSOR_IN_PAST = Airflow_var.sensor_in_past
 # Connections to the used servers, configurations can be found in the airflow-webserver GUI or over the commandline
-FTP_CONN_ID = 'ftp_server_pin_data'
-# Fernet-Key for the ftp connection: yP-Y5bM5fRJoyuBPIP31cRZng4Ktk4hV3vNtBuzkSl4=
-SQL_ALCHEMY_CONN = 'sql_alchemy_conn'
+FTP_CONN_ID = Airflow_var.ftp_conn_id
+SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
 # Slack connection ID
-SLACK_CONN_ID = 'slack'
-# Password slack: /T1JBVG25S/BNWRSJB99/z4Jua0GiOFfJPo303pSQQB76
-# The slack alert app is managed over the official slack API, settings and additional apps can be added there
+SLACK_CONN_ID = Airflow_var.slack_conn_id
 # Global dates variable will stay the same value throughout a task iteration
 regular_dates = []
 irregular_dates = []
+"""
+Continue development of this system.
+Structure of this DAG:
+Each step is marked with a short explanation of the function in the section and is graphically separated
+1. Step: Sensor new files on the FTP server
+2. Step: Download new files from the FTP server
+3. Step: Compare hashes of new and old files and update facts table according to the new files
+4. Step: Clean up, empty temp folder and delete all xcom variables
+"""
 
 
-# Alerts if the DAG fails to execute
 def fail_slack_alert(context):
-
+    """
+    Sends a message to the slack channel airflowalerts if a task in the pipeline fails
+    :param context: context
+    :return: fail_alert execution
+    """
     slack_webhook_token = BaseHook.get_connection(SLACK_CONN_ID).password
     slack_msg = """
             :red_circle: Task Failed. 
@@ -123,15 +147,12 @@ dag_3plus = DAG(dag_id=DAG_ID,
                 )
 
 
-# Functions for transformation, enriching and downloading data in the tasks further below
-# These functions are executed by PythonOperators and have to be callable
-# Important: If the callable function requires arguments, you need to add **kwargs and
-# set provide_context = True in the Operator settings.
-
-# Pull the xcom variables for the regular files from the database and store them locally in a global variable
-# for the duration of the execution of a task
 def extract_regular_dates():
-
+    """
+    Pull the xcom variables for the regular files from the database
+    Saves the pulled dates in a global variable
+    :return: None
+    """
     puller = xcom.XCom
     global regular_dates
 
@@ -156,9 +177,12 @@ def extract_regular_dates():
         regular_dates.append(dates)
 
 
-# Pull the xcom variables for the irregular files from the database
 def extract_irregular_dates():
-
+    """
+    Pull the xcom variables for the irregular files from the database
+    Saves the pulled dates in a global variable
+    :return: None
+    """
     puller = xcom.XCom
     global irregular_dates
 
@@ -172,11 +196,19 @@ def extract_irregular_dates():
         irregular_dates.append(update)
 
 
-# Download all regular files at one at a time sequential from ftp server and save them in a temporary directory
-# The dates are pulled from Xcom variables and are pushed from the Sensor_Regular_Files
 def download_regular_files_from_ftp_server(remote_path, local_path, file_list, suffix='.pin',
                                            ftp_conn='ftp_default', **kwargs):
-
+    """
+    Download all regular files at one at a time sequential from ftp server and save them in a temporary directory
+    The dates are pulled from Xcom variables and are pushed from the Sensor_Regular_Files
+    :param remote_path: Path to the location on the server
+    :param local_path: Path to the local directory where to save the files
+    :param file_list: Names of the files to download from the FTP server
+    :param suffix: Usually .pin should not change
+    :param ftp_conn: Connection to the server, for editing have look at the GUI of airflow under connections
+    :param kwargs:
+    :return: None
+    """
     conn = FTPHook(ftp_conn_id=ftp_conn)
     extract_regular_dates()
 
@@ -191,11 +223,19 @@ def download_regular_files_from_ftp_server(remote_path, local_path, file_list, s
             logging.info('Saved file at {}'.format(local_path_full))
 
 
-# Download irregular files from the ftp server if xcom variables are set to True
-# The xcom variables are only a boolean and only pushed if a new file is uploaded
 def download_irregular_files_from_ftp_server(remote_path, local_path, file_list, suffix='.pin',
                                              ftp_conn='ftp_default', **kwargs):
-
+    """
+    Download all irregular files at one at a time sequential from ftp server and save them in a temporary directory
+    The dates are pulled from Xcom variables and are pushed from the Sensor_Irregular_Files
+    :param remote_path: Path to the location on the server
+    :param local_path: Path to the local directory where to save the files
+    :param file_list: Names of the files to download from the FTP server
+    :param suffix: Usually .pin should not change
+    :param ftp_conn: Connection to the server, for editing have look at the GUI of airflow under connections
+    :param kwargs:
+    :return: None
+    """
     conn = FTPHook(ftp_conn_id=ftp_conn)
     extract_irregular_dates()
 
@@ -211,12 +251,13 @@ def download_irregular_files_from_ftp_server(remote_path, local_path, file_list,
         logging.info('Saved file at {}'.format(local_path_full))
 
 
-# Check the hash of the newly downloaded files to ensure updates with an effect
 def check_hash_of_new_files():
-
-    # Regular Files
-    # Pull dates from the database which are to be updated with the respective file type
-    # Compare the hash of the new and the old file to check for changes
+    """
+    Check the hash of the newly downloaded files to ensure updates with an effect.
+    At first check the regular files and then the irregular files. If not change has been detected remove the
+    respective date from the list od dates to update.
+    :return: None
+    """
     global regular_dates
     dates_to_update = set()
     for r_file, r_dates in zip(REGULAR_FILE_LIST, regular_dates):
@@ -250,8 +291,6 @@ def check_hash_of_new_files():
                 dates_to_update.update({present_date})
                 copyfile(r_temp_full_path, r_local_full_path)
 
-    # Irregular files
-    # Compare the hash of the new and the old file to check for changes
     global irregular_dates
     for ir_file, ir_update in zip(IRREGULAR_FILE_LIST, irregular_dates):
 
@@ -287,13 +326,14 @@ def check_hash_of_new_files():
     return dates_to_update
 
 
-# Data transformation and aggregation
-# Updated both facts-tables based on the remaining dates computes after the hashes has been compared
 def transformation_facts_table():
-
+    """
+    Data transformation and aggregation
+    Updates both facts-tables based on the remaining dates computed after the hashes has been compared
+    :return: None
+    """
     dates = set()
 
-    # Get the dates which has to be updated according to new and updated files
     global regular_dates
     global irregular_dates
     extract_regular_dates()
@@ -312,9 +352,11 @@ def transformation_facts_table():
     pin_functions.update_tsv_facts_table(dates)
 
 
-# Delete content of temp folder such that it returns to an empty state
 def delete_content_temp_dir():
-
+    """
+    Delete content of the temp folder such that it returns to an empty state
+    :return: None
+    """
     path = LOCAL_PATH + 'temp/'
     for file in os.listdir(path):
         file_path = os.path.join(path, file)
@@ -325,16 +367,17 @@ def delete_content_temp_dir():
             logging.info(e)
 
 
+# -------------------------------------------------------------------------------------------------------------------
+# 1. and 2. Step:
 # Sensors and Tasks to update and download files from the ftp server
 # The logic under which the tasks operate is defined in the python operations above or in the accompanied
-# Sensor_3plus.py file
-# Sensor to observate the creation and the modification time of regular files
+# Sensor_3plus.py file Sensor to observe the creation and the modification time of regular files
 Sensor_Regular_Files = Sensors_3plus.SensorRegularFiles(
     task_id='Sensor_regular_files',
     server_path=REMOTE_PATH,
     local_path=LOCAL_PATH,
     suffix=SUFFIX,
-    days_past=10,
+    days_past=SENSOR_IN_PAST,
     file_list=REGULAR_FILE_LIST,
     ftp_conn_id=FTP_CONN_ID,
     fail_on_transient_errors=True,
@@ -345,7 +388,6 @@ Sensor_Regular_Files = Sensors_3plus.SensorRegularFiles(
     do_xcom_push=True,
     dag=dag_3plus
 )
-
 # Download regular files to a temporary directory before continuing with the update
 Task_Download_Regular_Files = PythonOperator(
     task_id='Download_regular_files',
@@ -381,7 +423,6 @@ Sensor_Irregular_Files = Sensors_3plus.SensorIrregularFiles(
     do_xcom_push=True,
     dag=dag_3plus
 )
-
 # Download irregular files to a temporary directory before moving to further update
 Task_Download_Irregular_Files = PythonOperator(
     task_id='Download_irregular_files',
@@ -402,6 +443,8 @@ Task_Download_Irregular_Files = PythonOperator(
 )
 
 
+# -------------------------------------------------------------------------------------------------------------------
+# 3. Step
 # Compares also hashes to check if the file really has to be updated with the check_hashes function
 # eventually updates the facts table with the remaining dates which have been determined to be new
 Task_Update_Facts_Table = PythonOperator(
@@ -416,12 +459,11 @@ Task_Update_Facts_Table = PythonOperator(
 )
 
 
+# -------------------------------------------------------------------------------------------------------------------
+# 4. Step
 # Delete all the xcom variables from the sqlite database
 # The deletion of the Xcom has to be done on the default DB for configuration or changing the db
-# consult the airflow.cfg file for configuration of the database.
 # Also, the existing DB and connections should be viewable in the Airflow-GUI.
-# The connection has been secured with a Fernet Key through the apache-airflow[crypto] package for modification,
-# please consult the official documentation of said package
 Task_Delete_Xcom_Variables = SqliteOperator(
     task_id='Delete_xcom',
     sql="delete from xcom where dag_id='dag_3plus'",
@@ -429,7 +471,6 @@ Task_Delete_Xcom_Variables = SqliteOperator(
     trigger_rule='all_done',
     dag=dag_3plus
 )
-
 # Delete the content of the temp dir for a rounded execution and no remaining files in future iteration
 Task_Delete_Content_temp_dir = PythonOperator(
     task_id='Delete_content_temp_dir',

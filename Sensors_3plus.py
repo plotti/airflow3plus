@@ -8,12 +8,18 @@ from airflow.models import xcom
 from airflow.operators.sensors import BaseSensorOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.contrib.hooks.ftp_hook import FTPHook
+"""
+Both Sensor check for newly created files and push a xcom variable of a date or a boolean on the database
+depending on the type of the file. Regular files push a date and irregular files push a boolean.
+The logic behind the sensors is a comparison between most recent modification time of same files.
+"""
 
 
-# Sensor for missing files and recent modifications
-# Checks all regular file for existence on the local directory and recency of the upload
 class SensorRegularFiles(BaseSensorOperator):
-
+    """
+    Sensor for missing files and recent modifications
+    Checks all regular file for existence on the local directory and recency of the upload
+    """
     # Errors that are transient in nature, and where action can be retried
     transient_errors = [421, 425, 426, 434, 450, 451, 452]
 
@@ -101,9 +107,11 @@ class SensorRegularFiles(BaseSensorOperator):
         return update
 
 
-# Sensor to observe the files which are not updated very often and do not change nomenclature
 class SensorIrregularFiles(BaseSensorOperator):
-
+    """
+    Sensor to observe the files which are not updated very often and do not change nomenclature
+    in our case Station.pin, Crit.pin and CritCode.pin
+    """
     # Errors that are transient in nature, and where action can be retried
     transient_errors = [421, 425, 426, 434, 450, 451, 452]
 
