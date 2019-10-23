@@ -12,7 +12,6 @@ from airflow.operators.bash_operator import BashOperator
 from airflow.hooks.base_hook import BaseHook
 from airflow.contrib.operators.slack_webhook_operator import SlackWebhookOperator
 from datetime import datetime, timedelta
-
 """
 DAG to run in case of total failure and requirement of the recomputing the whole facts table
 Deletes in a first step all the data of the previous iteration then downloads all the files and 
@@ -22,14 +21,20 @@ tsv function. Ensure correct file paths.
 The reset DAG is structured in 3 blocks, annotated by a graphical lines grouping the tasks. First step is deleting the
 old data and facts tables. Second step is download of the current PIN data and the last step is computing the 
 facts tables.
+This DAG can only be triggered manually.
 """
-Airflow_var = Airflow_variables.AirflowVariables()
 DAG_ID = 'dag_reset'
+Airflow_var = Airflow_variables.AirflowVariables()
+# Global variables used in this file
 SLACK_CONN_ID = Airflow_var.slack_conn_id
 LOCAL_PATH = Airflow_var.local_path
 SUFFIX = Airflow_var.suffix
+DAYS_IN_YEAR = Airflow_var.days_in_year
+REGULAR_FILE_LIST = Airflow_var.regular_file_list
+IRREGULAR_FILE_LIST = Airflow_var.irregular_file_list
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def fail_slack_alert(context):
     """
     Sends a message to the slack channel airflowalerts if a task in the pipeline fails
@@ -61,7 +66,6 @@ def fail_slack_alert(context):
     return failed_alert.execute(context=context)
 
 
-# Implement a DAG in case a total reset is required
 default_args = {
     'owner': '3plus',
     'depends_on_past': False,
@@ -69,9 +73,7 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
     'on_failure_callback': fail_slack_alert
-    }
-
-
+}
 # DAG Definition and various setting influencing the workflow of the DAG
 dag_reset = DAG(dag_id=DAG_ID,
                 description='DAG used in case that all the facts table has to be recomputed',
@@ -80,11 +82,12 @@ dag_reset = DAG(dag_id=DAG_ID,
                 end_date=None,
                 default_args=default_args,
                 concurrency=2,
-                max_active_runs=4,
-                dagrun_timeout=timedelta(hours=4),
+                max_active_runs=2,
+                dagrun_timeout=timedelta(days=2),
                 catchup=False)
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def wait_some_time():
     """
     Wait 1 min before continuing with the execution, to give the possibility to cancel the process
@@ -104,41 +107,43 @@ def delete_pin_data():
     """
     logging.info('Delete everything')
 
-    regular_file_list = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
-    irregular_file_list = ['Station', 'CritCode', 'Crit']
-
-    for name in regular_file_list:
+    for name in REGULAR_FILE_LIST:
         dir_path = LOCAL_PATH + name
         shutil.rmtree(dir_path)
         os.mkdir(dir_path)
 
-    for name in irregular_file_list:
+    for name in IRREGULAR_FILE_LIST:
         file_path = LOCAL_PATH + name + SUFFIX
         if os.path.isfile(file_path):
             os.remove(file_path)
 
+    logging.info('Deleted all the PIN Data')
+
     year = datetime.now().year
     start = str(year) + '0101'
+
     date = datetime.strptime(start, '%Y%m%d')
-    r_date = date
-    ir_date = date
+    lv_date = date
+    tsv_date = date
 
     leap = 0
     if calendar.isleap(year):
         leap = 1
 
-    for i in range(364 + leap):
-        r_date = (r_date + timedelta(days=i))
-        str_date = r_date.strftime('%Y%m%d')
-        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, str_date)):
-            os.remove(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, str_date))
+    for i in range(DAYS_IN_YEAR+leap):
+        lv_date = (lv_date + timedelta(days=1))
+        r_date = lv_date.strftime('%Y%m%d')
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, r_date)):
+            os.rename(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG_old.csv' % (start, r_date),
+                      LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, r_date))
             break
 
-    for i in range(364 + leap):
-        ir_date = (ir_date + timedelta(days=i))
-        istr_date = ir_date.strftime('%Y%m%d')
-        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, istr_date)):
-            os.remove(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, istr_date))
+    for i in range(DAYS_IN_YEAR+leap):
+        tsv_date = (tsv_date + timedelta(days=1))
+        ir_date = tsv_date.strftime('%Y%m%d')
+        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, ir_date)):
+            os.rename(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, ir_date),
+                      LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG_old.csv' % (start, ir_date))
             break
 
 
@@ -166,7 +171,7 @@ def create_live_facts_table():
         leap = 1
 
     # Detection of checkpoint
-    for i in range(364+leap):
+    for i in range(DAYS_IN_YEAR+leap):
         pot_date = (date + timedelta(days=i)).strftime('%Y%m%d')
         if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, pot_date)):
             date = datetime.strptime(pot_date, '%Y%m%d')
@@ -181,7 +186,6 @@ def create_live_facts_table():
             add = date.strftime('%Y%m%d')
             if add == end:
                 cond = True
-                break
             dates.update([int(add)])
             date = date + timedelta(days=1)
 
@@ -216,14 +220,16 @@ def create_tsv_facts_table():
     if calendar.isleap(year):
         leap = 1
 
-    for i in range(364+leap):
+    # Detection of checkpoint
+    for i in range(DAYS_IN_YEAR+leap):
         pot_date = (date + timedelta(days=i)).strftime('%Y%m%d')
         if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, pot_date)):
             date = datetime.strptime(pot_date, '%Y%m%d')
             break
 
+    logging.info('Will update from date %s' % date)
     while True:
-
+        logging.info('Updating still ongoing')
         dates = set()
 
         for i in range(7):
@@ -231,13 +237,13 @@ def create_tsv_facts_table():
             add = date.strftime('%Y%m%d')
             if add == end:
                 cond = True
-                break
             dates.update([int(add)])
             date = date + timedelta(days=1)
 
         pin_func_exp.update_tsv_facts_table(dates)
 
         if cond:
+            logging.info("Reached the end date successfully, finished tsv table")
             break
 
 
@@ -263,7 +269,7 @@ bash_irregular_download = "cd /home/floosli/Documents/PIN_Data &&" \
     "wget -nc 'ftp://ftp.mpg-ftp.ch/PIN-Daten/Station.pin' --ftp-user=3plus@mpg-ftp.ch --ftp-password=cJGQNd0d"
 
 
-# -------------------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # 1. Step: Give some time to reconsider your decision and delete eventually all the PIN Data
 Task_sleep = PythonOperator(
     task_id='sleep',
@@ -278,11 +284,12 @@ Task_delete_all = PythonOperator(
     retries=5,
     retry_delay=timedelta(seconds=5),
     execution_timeout=timedelta(minutes=2),
+    trigger_rule='all_done',
     dag=dag_reset
 )
 
 
-# --------------------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # 2. Step: Download each type of file one after another according to the bash commands from above
 Task_Weight_Download = BashOperator(
     task_id='download_weight',
@@ -340,7 +347,7 @@ Task_Irregular_Download = BashOperator(
 )
 
 
-# --------------------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # 3. Step
 # Compute the facts tables
 Task_create_live_facts_table = PythonOperator(
@@ -365,6 +372,7 @@ Task_create_tsv_facts_table = PythonOperator(
 )
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 # Schedule of the hard reset DAG
 Task_sleep >> Task_delete_all >> [Task_Weight_Download, Task_BrdCst_Download, Task_SocDem_Download,
                                   Task_UsageLive_Download, Task_UsageTimeShifted_Download, Task_Irregular_Download] >> \

@@ -25,7 +25,7 @@ class AirflowVariables:
         self.regular_file_list = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
         self.irregular_file_list = ['Station', 'CritCode', 'Crit']
         self.sensor_in_past = 10
-        self.days_in_year = 364
+        self.days_in_year = 365
         self.days_tsv = 8
         self.ftp_conn_id = 'ftp_server_pin_data'
         self.sql_alchemy_conn = 'sql_alchemy_conn'

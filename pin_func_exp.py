@@ -6,17 +6,23 @@ import Airflow_variables
 
 from datetime import timedelta, datetime
 from collections import Counter
-
-
+"""
+These pin functions are used to compute both facts table, meaning the live facts table and the time shifted table
+A logical flow of the computation can be found above each block which are responsible for the respective 
+computation. In the first part of the file many getter functions are defined to improve the overall structure 
+of the computation.
+The correctness of the computation has been verified with comparision with values from infosys. Some unexplained 
+operations are direct consequence of infosys data architecture, as an example the added second to compute the rating.
+"""
 Airflow_var = Airflow_variables.AirflowVariables()
-# Some variable to influence the computation of the facts tables
+# Some global variables
 local_path = Airflow_var.local_path
 days_in_year = Airflow_var.days_in_year
 TSV_DAYS = Airflow_var.days_tsv
 
 
-#########################################################
-##### GENERAL PURPOSE FILE OPENERS AND DICTIONARIES #####
+# ----------------------------------------------------------------------------------------------------------------------
+# GENERAL PURPOSE FILE OPENERS AND DICTIONARIES
 # Getter/ Helper functions for facts tables aggregation and computation
 def get_kanton_dict(date):
     """
@@ -152,58 +158,6 @@ def get_brc(date):
     return brc
 
 
-def get_live_viewers(date, agemin, agemax):
-    """
-    Helper function to open the Live Usage file for a given date,
-    format it to right dtypes and filter on the parameters passed to the function.
-    Adds also 1 day to the End -and Starttime according to the threshold to ensure a correct computation.
-    :param date: Day of interest
-    :param agemin: Minimum age of the viewer, for filtering of the group of interest
-    :param agemax: Maximum age of the viewer, for filtering of the group of interest
-    :return: All live viewers interesting for our facts table
-    """
-    with open(f'{local_path}UsageLive/UsageLive_{date}.pin', 'r', encoding='latin-1') as f:
-        df_usagelive = pd.read_csv(f, dtype={'HouseholdId': 'object', 'IndividualId': 'object',
-                                             'EndTime': 'object', 'StartTime': 'object'})
-    # Filters only on live viewers
-    df_usagelive = df_usagelive[df_usagelive['AudienceType'] == 1]
-    df_usagelive['H_P'] = df_usagelive['HouseholdId'] + "_" + df_usagelive['IndividualId']
-
-    # Filtering on language
-    df_usagelive['Sprache'] = df_usagelive['H_P'].map(get_lang_dict(date))
-    df_usagelive = df_usagelive[df_usagelive['Sprache'] == 1]
-
-    # Filter on age
-    df_usagelive['Age'] = df_usagelive['H_P'].map(get_age_dict(date))
-    df_usagelive = df_usagelive[(df_usagelive['Age'] >= agemin) & (df_usagelive['Age'] <= agemax)]
-
-    # Formatting date, start and end time
-    ud_str = str(df_usagelive['UsageDate'].iloc[0])
-    ud = pd.to_datetime(ud_str, format="%Y%m%d")
-    df_usagelive['UsageDate'] = ud
-
-    st_vec = df_usagelive['StartTime'].tolist()
-    st_vec = [ud_str + o.zfill(6) for o in st_vec]
-    st_vec = pd.to_datetime(st_vec, format="%Y%m%d%H%M%S")
-    df_usagelive['StartTime'] = st_vec
-
-    et_vec = df_usagelive['EndTime'].tolist()
-    et_vec = [ud_str + o.zfill(6) for o in et_vec]
-    et_vec = pd.to_datetime(et_vec, format="%Y%m%d%H%M%S")
-    df_usagelive['EndTime'] = et_vec
-
-    # Threshold adjustment
-    new_day_thresh = pd.to_datetime('020000', format='%H%M%S').time()
-    df_usagelive.loc[df_usagelive['StartTime'].dt.time < new_day_thresh, 'StartTime'] += pd.to_timedelta('1 Days')
-    df_usagelive.loc[df_usagelive['EndTime'].dt.time <= new_day_thresh, 'EndTime'] += pd.to_timedelta('1 Days')
-
-    # Mapping of weights and kanton to the viewers
-    df_usagelive['Weights'] = df_usagelive['H_P'].map(get_weight_dict(date))
-    df_usagelive['Kanton'] = df_usagelive['H_P'].map(get_kanton_dict(date))
-
-    return df_usagelive
-
-
 def get_live_viewers_from_show(show, df_live):
     """
     Filters 'live_df' to keep only the viewers of 'show'
@@ -236,15 +190,14 @@ def get_ovn_viewers_from_show(show, df):
     return df
 
 
-##############################################
-##### PREPROCESSING OF TIME SHIFTED DATA #####
-# ------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+# PREPROCESSING OF TIME SHIFTED DATA
 # Flow:
 # 1. get_tsv_viewers. -> all shifted usage from a date
 # 2. get_brc for 7 days before tsv date -> all programs that ran in the last 7 days
 # 3. map_viewers_ovn. -> maps usage to shows, from the 2 above files
 # 4. df_to_disk_ovn. -> saves to disk. Create Dataframe for update
-# ------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 def map_viewers_ovn(sched, ovn_df):
     """
     Maps viewer's time shifted usage to shows. Filter for unique values to
@@ -412,8 +365,8 @@ def update_tsv_facts_table(dates):
                                                                        'Kanton': int, 'Platform': int, 'StationId': int,
                                                                        'Title': str, 'TvSet': int, 'Weights': float,
                                                                        'UsageDate': int, 'ViewingActivity': int,
-                                                                       'age': int, 'broadcast_id': int, 'date': int,
-                                                                       'duration': int, 'program_duration': int,
+                                                                       'age': int, 'broadcast_id': int, 'date': str,
+                                                                       'duration': float, 'program_duration': int,
                                                                        'station': str})
             break
 
@@ -494,19 +447,18 @@ def update_tsv_facts_table(dates):
             else:
                 newest = True
 
-    logging.info('Successfully updates time-shifted facts-table')
+    logging.info('Successfully updated time-shifted facts-table')
 
 
-######################################
-##### PREPROCESSING OF LIVE DATA #####
-# ------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+# PREPROCESSING OF LIVE DATA
 # Function for the airflow pipeline, main function for computation update_facts_table
 # Flow:
 # 1. get_live_viewers. -> all live usage from a date
 # 2. get_brc. -> all programs from a date
 # 3. map_viewers. -> maps viewers to shows from the 2 above files
 # 4. df_to_disk. -> saves results to disk. Create Dataframe for update
-# ------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 def map_viewers(sched, lv):
     """
     Maps viewer's live usage to shows. Filter for unique values to
@@ -589,6 +541,58 @@ def df_to_disk(vw, sh, date):
     viewers['date'] = date
 
     return viewers
+
+
+def get_live_viewers(date, agemin, agemax):
+    """
+    Helper function to open the Live Usage file for a given date,
+    format it to right dtypes and filter on the parameters passed to the function.
+    Adds also 1 day to the End -and Starttime according to the threshold to ensure a correct computation.
+    :param date: Day of interest
+    :param agemin: Minimum age of the viewer, for filtering of the group of interest
+    :param agemax: Maximum age of the viewer, for filtering of the group of interest
+    :return: All live viewers interesting for our facts table
+    """
+    with open(f'{local_path}UsageLive/UsageLive_{date}.pin', 'r', encoding='latin-1') as f:
+        df_usagelive = pd.read_csv(f, dtype={'HouseholdId': 'object', 'IndividualId': 'object',
+                                             'EndTime': 'object', 'StartTime': 'object'})
+    # Filters only on live viewers
+    df_usagelive = df_usagelive[df_usagelive['AudienceType'] == 1]
+    df_usagelive['H_P'] = df_usagelive['HouseholdId'] + "_" + df_usagelive['IndividualId']
+
+    # Filtering on language
+    df_usagelive['Sprache'] = df_usagelive['H_P'].map(get_lang_dict(date))
+    df_usagelive = df_usagelive[df_usagelive['Sprache'] == 1]
+
+    # Filter on age
+    df_usagelive['Age'] = df_usagelive['H_P'].map(get_age_dict(date))
+    df_usagelive = df_usagelive[(df_usagelive['Age'] >= agemin) & (df_usagelive['Age'] <= agemax)]
+
+    # Formatting date, start and end time
+    ud_str = str(df_usagelive['UsageDate'].iloc[0])
+    ud = pd.to_datetime(ud_str, format="%Y%m%d")
+    df_usagelive['UsageDate'] = ud
+
+    st_vec = df_usagelive['StartTime'].tolist()
+    st_vec = [ud_str + o.zfill(6) for o in st_vec]
+    st_vec = pd.to_datetime(st_vec, format="%Y%m%d%H%M%S")
+    df_usagelive['StartTime'] = st_vec
+
+    et_vec = df_usagelive['EndTime'].tolist()
+    et_vec = [ud_str + o.zfill(6) for o in et_vec]
+    et_vec = pd.to_datetime(et_vec, format="%Y%m%d%H%M%S")
+    df_usagelive['EndTime'] = et_vec
+
+    # Threshold adjustment, 2am problem for StartTime and EndTime
+    new_day_thresh = pd.to_datetime('020000', format='%H%M%S').time()
+    df_usagelive.loc[df_usagelive['StartTime'].dt.time < new_day_thresh, 'StartTime'] += pd.to_timedelta('1 Days')
+    df_usagelive.loc[df_usagelive['EndTime'].dt.time <= new_day_thresh, 'EndTime'] += pd.to_timedelta('1 Days')
+
+    # Mapping of weights and kanton to the viewers
+    df_usagelive['Weights'] = df_usagelive['H_P'].map(get_weight_dict(date))
+    df_usagelive['Kanton'] = df_usagelive['H_P'].map(get_kanton_dict(date))
+
+    return df_usagelive
 
 
 def imp_live_viewers(date, stations):
@@ -719,9 +723,10 @@ def update_live_facts_table(dates):
     logging.info('Successfully updated live facts-table')
 
 
-# -------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+# VERIFICATION FUNCTIONS
 # Functions to compute the ratings based on the facts tables
-# -------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 def add_individual_ratings(df):
     """
     Computed the rating of each show
@@ -790,16 +795,16 @@ def compute_tsv_rt(path, station, path_comp_sol):
     df_2019_tsv.to_csv(path_comp_sol + 'tsv_rt_T_table')
 
 
-def verify_live_table(path_comp_sol, path_infosys_path, comparison_path):
+def verify_live_table(path_comp_sol, path_infosys_sol, comparison_path):
     """
     Verify the result from our live facts table by comparing it with the data from infosys
     :param path_comp_sol: Path to our computed ratings
-    :param path_infosys_path: Path to our infosys table
+    :param path_infosys_sol: Path to our infosys table
     :param comparison_path: Path to where we save the comparison between both values
     :return: None
     """
     comp_sol = pd.read_csv(path_comp_sol)
-    infosys_sol = pd.read_excel(path_infosys_path, names=[1, 2, 3, 4, 5, 6, 7, 8, 9, 'broadcast_id',
+    infosys_sol = pd.read_excel(path_infosys_sol, names=[1, 2, 3, 4, 5, 6, 7, 8, 9, 'broadcast_id',
                                                           'individual_Rt-T_live', 'individual_Rt-T_tsv',
                                                           13, 14, 15, 16, 17, 18])
     infosys_sol = infosys_sol.iloc[3:]
@@ -812,16 +817,16 @@ def verify_live_table(path_comp_sol, path_infosys_path, comparison_path):
     sol.to_csv(comparison_path)
 
 
-def verify_tsv_table(path_comp_sol, path_infosys_path, comparison_path):
+def verify_tsv_table(path_comp_sol, path_infosys_sol, comparison_path):
     """
     Verify the result from our tsv facts table by comparing it with the data from infosys
     :param path_comp_sol: Path to our computed ratings
-    :param path_infosys_path: Path to our infosys table
+    :param path_infosys_sol: Path to our infosys table
     :param comparison_path: Path to where we save the comparison between both values
     :return: None
     """
     comp_sol = pd.read_csv(path_comp_sol)
-    infosys_sol = pd.read_excel(path_infosys_path, names=[1, 2, 3, 4, 5, 6, 7, 8, 9, 'broadcast_id',
+    infosys_sol = pd.read_excel(path_infosys_sol, names=[1, 2, 3, 4, 5, 6, 7, 8, 9, 'broadcast_id',
                                                           'individual_Rt-T_live', 'individual_Rt-T_tsv',
                                                           13, 14, 15, 16, 17, 18])
     infosys_sol = infosys_sol.iloc[3:]

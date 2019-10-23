@@ -23,7 +23,17 @@ A scheduling system based on the Airflow library. We'd like to update locally sa
 generate enriched reports and tables based on the new entries.
 The 3plus_dag is the defined DAG in which all the task are unraveled and scheduled.
 Most Python_functions used in the PythonOperators are defined in the accompanied file pin_functions.py
-for clearer maintainability add additional functions in the previously mentioned file.
+for clearer maintainability add additional functions in the previously mentioned file or create new ones.
+
+Install airflow:
+1. pip3 install apache-airflow[*], at * you can add additional packages if required, if no packages leave the brackets 
+out of the command. 22.10.19 additional packages: crypto
+
+2. airflow initdb to initiate the airflow database, execute this command at the directory where you want to setup 
+your pipeline. Default Db is a SQLite for different one have a look at the documentation and the 
+airflow database backend
+
+*Default Executor of our pipeline is the Serialexecutor for other options have a look at the airflow documentation.
 
 How to start the airflow process:
 1. Start the airflow scheduler with the command: airflow scheduler
@@ -48,23 +58,22 @@ Many variables for path, ranges etc can be found in the Airflow_variables class.
 
 The slack alert app is managed over the official slack API, settings and additional apps can be added there
 pls have a look at this blogpost to recreate the implementation 
-https://medium.com/datareply/integrating-slack-alerts-in-airflow-c9dcd155105
+https://medium.com/datareply/integrating-slack-alerts-in-airflow-c9dcd155105 version 2
 Current Password slack: /T1JBVG25S/BNWRSJB99/z4Jua0GiOFfJPo303pSQQB76
 
 The FTP-connection is secured with a fernet-key, according to the implementation from airflow[crypt] package
 Current Fernet-Key for the ftp connection: yP-Y5bM5fRJoyuBPIP31cRZng4Ktk4hV3vNtBuzkSl4=
 
-Currently the xcoim variables are stored on a hosted sql_alchemy db. Have a look at 
+Currently the xcom variables are stored on a hosted sql_alchemy db. Have a look at 
 the airflow.cfg file for configuration of the database.
 
 The Schedule at the bottom of the file shows how the task are executed after each other, it is not allowed to contain 
 any circles. If you have task defined but not in the schedule they will still be executed as a single instance so
 you have to comment them out or delete them if this behaviour is not desired
 """
+DAG_ID = 'dag_3plus'
 Airflow_var = Airflow_variables.AirflowVariables()
 # Global variables used in the DAG
-DAG_ID = 'dag_3plus'
-# the Sensor and respective Function
 REMOTE_PATH = Airflow_var.remote_path
 LOCAL_PATH = Airflow_var.local_path
 SUFFIX = Airflow_var.suffix
@@ -72,7 +81,7 @@ SUFFIX = Airflow_var.suffix
 REGULAR_FILE_LIST = Airflow_var.regular_file_list
 IRREGULAR_FILE_LIST = Airflow_var.irregular_file_list
 SENSOR_IN_PAST = Airflow_var.sensor_in_past
-# Connections to the used servers, configurations can be found in the airflow-webserver GUI or over the commandline
+# Connections to the used servers, configurations can be found in the airflow webserver GUI or over the commandline
 FTP_CONN_ID = Airflow_var.ftp_conn_id
 SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
 # Slack connection ID
@@ -88,9 +97,16 @@ Each step is marked with a short explanation of the function in the section and 
 2. Step: Download new files from the FTP server
 3. Step: Compare hashes of new and old files and update facts table according to the new files
 4. Step: Clean up, empty temp folder and delete all xcom variables
+
+To add Task:
+Read some Airflow examples.
+1. Define a task of what you need(What kind of Operator or Sensor you need -> respective Documentation)
+2. Add it to the schedule at the position you lie
+3. Load it into the airflow directory
 """
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def fail_slack_alert(context):
     """
     Sends a message to the slack channel airflowalerts if a task in the pipeline fails
@@ -130,9 +146,7 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
     'on_failure_callback': fail_slack_alert
-    }
-
-
+}
 # DAG Definition and various setting influencing the workflow of the DAG
 dag_3plus = DAG(dag_id=DAG_ID,
                 description='DAG used to automate the PIN data gathering of 3plus and to update modified files',
@@ -142,11 +156,12 @@ dag_3plus = DAG(dag_id=DAG_ID,
                 default_args=default_args,
                 concurrency=2,
                 max_active_runs=3,
-                dagrun_timeout=timedelta(hours=4),
+                dagrun_timeout=timedelta(hours=6),
                 catchup=False
                 )
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def extract_regular_dates():
     """
     Pull the xcom variables for the regular files from the database
@@ -170,7 +185,7 @@ def extract_regular_dates():
                 val = json.loads(date.value)
                 dates.append(val)
             except TypeError as e:
-                logging.info('Got %s, will continue as planed' % str(e))
+                logging.info('Unfortunately got %s, will continue as planed' % str(e))
                 continue
 
         dates = set(dates)
@@ -206,7 +221,7 @@ def download_regular_files_from_ftp_server(remote_path, local_path, file_list, s
     :param file_list: Names of the files to download from the FTP server
     :param suffix: Usually .pin should not change
     :param ftp_conn: Connection to the server, for editing have look at the GUI of airflow under connections
-    :param kwargs:
+    :param kwargs: Has to be added otherwise it won't work
     :return: None
     """
     conn = FTPHook(ftp_conn_id=ftp_conn)
@@ -233,7 +248,7 @@ def download_irregular_files_from_ftp_server(remote_path, local_path, file_list,
     :param file_list: Names of the files to download from the FTP server
     :param suffix: Usually .pin should not change
     :param ftp_conn: Connection to the server, for editing have look at the GUI of airflow under connections
-    :param kwargs:
+    :param kwargs: Has to be added otherwise it won't work
     :return: None
     """
     conn = FTPHook(ftp_conn_id=ftp_conn)
@@ -255,7 +270,9 @@ def check_hash_of_new_files():
     """
     Check the hash of the newly downloaded files to ensure updates with an effect.
     At first check the regular files and then the irregular files. If not change has been detected remove the
-    respective date from the list od dates to update.
+    respective date from the list od dates to update. Before the execution of this function the files are stored at
+    a temporary directory called temp and are moved to their assigned folder if they are determined
+    as new  or updated.
     :return: None
     """
     global regular_dates
@@ -329,7 +346,7 @@ def check_hash_of_new_files():
 def transformation_facts_table():
     """
     Data transformation and aggregation
-    Updates both facts-tables based on the remaining dates computed after the hashes has been compared
+    Updates both facts tables based on the remaining dates computed after the hashes has been compared
     :return: None
     """
     dates = set()
@@ -367,7 +384,7 @@ def delete_content_temp_dir():
             logging.info(e)
 
 
-# -------------------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # 1. and 2. Step:
 # Sensors and Tasks to update and download files from the ftp server
 # The logic under which the tasks operate is defined in the python operations above or in the accompanied
@@ -443,7 +460,7 @@ Task_Download_Irregular_Files = PythonOperator(
 )
 
 
-# -------------------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # 3. Step
 # Compares also hashes to check if the file really has to be updated with the check_hashes function
 # eventually updates the facts table with the remaining dates which have been determined to be new
@@ -459,7 +476,7 @@ Task_Update_Facts_Table = PythonOperator(
 )
 
 
-# -------------------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # 4. Step
 # Delete all the xcom variables from the sqlite database
 # The deletion of the Xcom has to be done on the default DB for configuration or changing the db
@@ -482,7 +499,7 @@ Task_Delete_Content_temp_dir = PythonOperator(
     dag=dag_3plus
 )
 
-
+# ----------------------------------------------------------------------------------------------------------------------
 # Task Scheduling for Retrieving data and Transforming them to the facts table.
 # Scheduling is not allowed to contain any circles or repetitions of the same task
 # A graphical view of the DAG is given in the GUI
