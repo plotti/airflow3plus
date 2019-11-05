@@ -86,9 +86,6 @@ FTP_CONN_ID = Airflow_var.ftp_conn_id
 SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
 # Slack connection ID
 SLACK_CONN_ID = Airflow_var.slack_conn_id
-# Global dates variable will stay the same value throughout a task iteration
-regular_dates = []
-irregular_dates = []
 """
 Continue development of this system.
 Structure of this DAG:
@@ -169,7 +166,7 @@ def extract_regular_dates():
     :return: None
     """
     puller = xcom.XCom
-    global regular_dates
+    regular_dates = []
 
     for file in REGULAR_FILE_LIST:
 
@@ -191,6 +188,8 @@ def extract_regular_dates():
         dates = set(dates)
         regular_dates.append(dates)
 
+    return regular_dates
+
 
 def extract_irregular_dates():
     """
@@ -199,7 +198,7 @@ def extract_irregular_dates():
     :return: None
     """
     puller = xcom.XCom
-    global irregular_dates
+    irregular_dates = []
 
     for file in IRREGULAR_FILE_LIST:
 
@@ -209,6 +208,8 @@ def extract_irregular_dates():
                                 include_prior_dates=True)
 
         irregular_dates.append(update)
+
+    return irregular_dates
 
 
 def download_regular_files_from_ftp_server(remote_path, local_path, file_list, suffix='.pin',
@@ -225,7 +226,7 @@ def download_regular_files_from_ftp_server(remote_path, local_path, file_list, s
     :return: None
     """
     conn = FTPHook(ftp_conn_id=ftp_conn)
-    extract_regular_dates()
+    regular_dates = extract_regular_dates()
 
     for file, r_dates in zip(file_list, regular_dates):
 
@@ -252,7 +253,7 @@ def download_irregular_files_from_ftp_server(remote_path, local_path, file_list,
     :return: None
     """
     conn = FTPHook(ftp_conn_id=ftp_conn)
-    extract_irregular_dates()
+    irregular_dates = extract_irregular_dates()
 
     for file, update in zip(file_list, irregular_dates):
 
@@ -266,7 +267,7 @@ def download_irregular_files_from_ftp_server(remote_path, local_path, file_list,
         logging.info('Saved file at {}'.format(local_path_full))
 
 
-def check_hash_of_new_files():
+def check_hash_of_new_files(regular_dates, irregular_dates):
     """
     Check the hash of the newly downloaded files to ensure updates with an effect.
     At first check the regular files and then the irregular files. If not change has been detected remove the
@@ -275,7 +276,6 @@ def check_hash_of_new_files():
     as new  or updated.
     :return: None
     """
-    global regular_dates
     dates_to_update = set()
     for r_file, r_dates in zip(REGULAR_FILE_LIST, regular_dates):
 
@@ -308,7 +308,6 @@ def check_hash_of_new_files():
                 dates_to_update.update({present_date})
                 copyfile(r_temp_full_path, r_local_full_path)
 
-    global irregular_dates
     for ir_file, ir_update in zip(IRREGULAR_FILE_LIST, irregular_dates):
 
         if not ir_update:
@@ -343,30 +342,28 @@ def check_hash_of_new_files():
     return dates_to_update
 
 
-def transformation_facts_table():
+def update_facts_tables():
     """
     Data transformation and aggregation
     Updates both facts tables based on the remaining dates computed after the hashes has been compared
     :return: None
     """
-    dates = set()
+    regular_dates = extract_regular_dates()
+    irregular_dates = extract_irregular_dates()
 
-    global regular_dates
-    global irregular_dates
-    extract_regular_dates()
-    extract_irregular_dates()
-
-    for file_dates in regular_dates:
-        dates = dates | file_dates
-
-    update = check_hash_of_new_files()
-    dates = dates.intersection(update)
+    dates = check_hash_of_new_files(regular_dates, irregular_dates)
 
     logging.info('Starting with updating live facts-table')
     pin_functions.update_live_facts_table(dates)
 
     logging.info('Continuing with updating time-shifted facts-table')
     pin_functions.update_tsv_facts_table(dates)
+
+    pusher = xcom.XCom
+    for date in dates:
+        pusher.set(key='update', value=str(date), execution_date=datetime.now(timezone.utc),
+                   task_id='date_update', dag_id='dag_3plus')
+    # TODO push new days as new day date old from somewhere
 
 
 def delete_content_temp_dir():
@@ -467,7 +464,7 @@ Task_Download_Irregular_Files = PythonOperator(
 Task_Update_Facts_Table = PythonOperator(
     task_id='Update_facts_table',
     provide_context=False,
-    python_callable=transformation_facts_table,
+    python_callable=update_facts_tables,
     retries=3,
     retry_delay=timedelta(seconds=5),
     execution_timeout=timedelta(hours=1, minutes=20),
@@ -483,7 +480,7 @@ Task_Update_Facts_Table = PythonOperator(
 # Also, the existing DB and connections should be viewable in the Airflow-GUI.
 Task_Delete_Xcom_Variables = SqliteOperator(
     task_id='Delete_xcom',
-    sql="delete from xcom where dag_id='dag_3plus'",
+    sql="delete from xcom where task_id='date_push'",
     sqlite_conn_id=SQL_ALCHEMY_CONN,
     trigger_rule='all_done',
     dag=dag_3plus
@@ -499,6 +496,7 @@ Task_Delete_Content_temp_dir = PythonOperator(
     dag=dag_3plus
 )
 
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Task Scheduling for Retrieving data and Transforming them to the facts table.
 # Scheduling is not allowed to contain any circles or repetitions of the same task
@@ -507,3 +505,4 @@ Task_Delete_Content_temp_dir = PythonOperator(
 Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Update_Facts_Table
 Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Update_Facts_Table
 Task_Update_Facts_Table >> Task_Delete_Xcom_Variables >> Task_Delete_Content_temp_dir
+# ----------------------------------------------------------------------------------------------------------------------
