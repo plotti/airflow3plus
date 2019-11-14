@@ -1,9 +1,9 @@
 import Airflow_variables
 import Sensors_3plus
-import pin_func_exp
+import pin_functions
+import Transformations_Functions
 import json
 import logging
-import pandas as pd
 import os
 
 from airflow.models import DAG, xcom
@@ -24,6 +24,11 @@ DAYS_IN_YEAR = Airflow_var.days_in_year
 CHANNELS = Airflow_var.relevant_channels
 SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
 CHANNELS_OF_INTEREST = Airflow_var.channels_of_interest
+YEAR = Airflow_var.year
+MONTH = Airflow_var.month
+DAY = Airflow_var.day
+START = Airflow_var.start
+END_DAY = Airflow_var.end
 """
 This DAG runs functions which are transformations from the facts table.
 Consequently most of the functions used in this DAG expect that both the live facts table and the 
@@ -40,7 +45,7 @@ def fail_slack_alert(context):
     """
     slack_webhook_token = BaseHook.get_connection(SLACK_CONN_ID).password
     slack_msg = """
-            :red_circle: Task Failed. 
+            :angry: Task Failed. 
             *Task*: {task}  
             *Dag*: {dag} 
             *Execution Time*: {exec_date}  
@@ -58,7 +63,8 @@ def fail_slack_alert(context):
         http_conn_id='slack',
         webhook_token=slack_webhook_token,
         message=slack_msg,
-        username='AirflowAlert')
+        username='AirflowAlert'
+    )
 
     return failed_alert.execute(context=context)
 
@@ -70,13 +76,12 @@ default_args = {
     'email': ['floosli@3plus.tv'],
     'email_on_failure': False,
     'email_on_retry': False,
-    'on_failure_callback': fail_slack_alert
 }
 # DAG Definition and various setting influencing the workflow of the DAG
 dag_transformation = DAG(dag_id=DAG_ID,
                          description='DAG to update the viewers table for shows',
-                         schedule_interval=timedelta(days=1),
-                         start_date=datetime(year=2019, month=10, day=15, hour=12),
+                         schedule_interval='0 9,21 * * 1-5',
+                         start_date=datetime(year=2019, month=10, day=15, hour=14),
                          end_date=None,
                          default_args=default_args,
                          concurrency=2,
@@ -117,33 +122,40 @@ def compute_viewers_of_show():
     logging.info('Following dates will be updated %s' % dates)
     for channel in CHANNELS:
 
-        pin_func_exp.compute_viewers_for_channel(channel, dates)
+        Transformations_Functions.compute_viewers_for_channel(channel, dates)
         logging.info('Finished updating %s' % channel)
 
 
 def create_vorwoche_zuschauer():
+    """
+    Create the vorwoche zuschauer report based on the days that are new.
+    One xcom variable should be pushed onto the db to get all days which are new
+    :return: None
+    """
+    df = pin_functions.get_live_facts_table()[0]
 
-    df = pin_func_exp.get_live_facts_table()
-
-    df = df[df['station'].isin(CHANNELS_OF_INTEREST)]
-    df = pin_func_exp.add_individual_ratings(df)
-    df['Date'] = df['show_starttime'].dt.date
+    recent_day = START
+    END = datetime.strptime(END_DAY, '%Y%m%d')
+    for i in range(DAYS_IN_YEAR):
+        recent_day = (END - timedelta(days=i)).strftime('%Y%m%d')
+        if recent_day == START:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, recent_day)):
+            break
 
     puller = xcom.XCom
-    updates = puller.get_many(key='new_days', execution_date=datetime.now(timezone.utc), dag_ids='dag_3plus',
-                              include_prior_dates=True)
-    # TODO logic of new days, can work with date old
+    update = puller.get_one(key='newest_day', execution_date=datetime.now(timezone.utc), dag_id='dag_3plus',
+                            include_prior_dates=True)
+
+    date = datetime.strptime(update, '%Y%m%d')
+    recent_day = datetime.strptime(recent_day, '%Y%m%d')
     dates = []
-    for date in updates:
-
-        try:
-            val = json.loads(date.value)
-            dates.append(val)
-        except TypeError as e:
-            logging.info('Unfortunately got %s, will continue as planed' % str(e))
-            continue
-
-    dates = set(dates)
+    while True:
+        date += timedelta(days=1)
+        if recent_day < date:
+            break
+        else:
+            dates.append(date.strftime('%Y%m%d'))
 
     if not dates:
         logging.info('No dates have to be updated, exiting')
@@ -152,7 +164,7 @@ def create_vorwoche_zuschauer():
     logging.info('Following dates will be updated %s' % dates)
     for date in dates:
 
-        pin_func_exp.compute_zuschauer_vorwoche(date, df)
+        Transformations_Functions.compute_zuschauer_vorwoche(df, date)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -169,13 +181,38 @@ Sensor_facts_table_change = Sensors_3plus.SensorFactsTable(
 )
 
 Task_Compute_Tables = PythonOperator(
-    task_id='Compute_transformation_table',
+    task_id='Compute_viewers_of_show',
     provide_context=False,
     python_callable=compute_viewers_of_show,
     retries=3,
-    retry_delay=timedelta(seconds=5),
+    retry_delay=timedelta(minutes=3),
     execution_timeout=timedelta(hours=1),
     priority_weight=1,
+    dag=dag_transformation
+)
+
+Task_Generate_Report_Vorwoche = PythonOperator(
+    task_id='Report_Vorwoche',
+    provide_context=False,
+    python_callable=create_vorwoche_zuschauer,
+    retries=3,
+    retry_delay=timedelta(minutes=3),
+    execution_timeout=timedelta(hours=1),
+    priority_weight=2,
+    dag=dag_transformation
+)
+
+Sensor_most_recent_update = Sensors_3plus.SensorMostRecentUpdate(
+    task_id='Sensor_4days_since_last_update',
+    local_path=LOCAL_PATH,
+    fail_on_transient_errors=True,
+    retries=2,
+    poke_interval=60,
+    timeout=120,
+    soft_fail=False,
+    mode='reschedule',
+    trigger_rule='all_done',
+    on_failure_callback=fail_slack_alert,
     dag=dag_transformation
 )
 
@@ -184,10 +221,13 @@ Task_Delete_Xcom_Variables = SqliteOperator(
     sql="delete from xcom where dag_id='dag_3plus'",
     sqlite_conn_id=SQL_ALCHEMY_CONN,
     trigger_rule='all_done',
+    on_failure_callback=fail_slack_alert,
     dag=dag_transformation
 )
 
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Schedule of tasks
-Sensor_facts_table_change >> Task_Compute_Tables >> Task_Delete_Xcom_Variables
+Sensor_facts_table_change >> [Task_Generate_Report_Vorwoche, Task_Compute_Tables] >> Sensor_most_recent_update
+Sensor_most_recent_update >> Task_Delete_Xcom_Variables
 # ----------------------------------------------------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import time
 import shutil
 import logging
 import os
-import pin_func_exp
+import pin_functions
 import calendar
 import Airflow_variables
 
@@ -33,6 +33,11 @@ DAYS_IN_YEAR = Airflow_var.days_in_year
 REGULAR_FILE_LIST = Airflow_var.regular_file_list
 IRREGULAR_FILE_LIST = Airflow_var.irregular_file_list
 ADJUST_YEAR = Airflow_var.adjust_year
+YEAR = Airflow_var.year
+MONTH = Airflow_var.month
+DAY = Airflow_var.day
+START = Airflow_var.start
+END = Airflow_var.end
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -62,7 +67,8 @@ def fail_slack_alert(context):
         http_conn_id='slack',
         webhook_token=slack_webhook_token,
         message=slack_msg,
-        username='AirflowAlert')
+        username='AirflowAlert'
+    )
 
     return failed_alert.execute(context=context)
 
@@ -120,31 +126,28 @@ def delete_pin_data():
 
     logging.info('Deleted all the PIN Data')
 
-    year = datetime.now().year
-    start = str(year) + '0101'
-
-    date = datetime.strptime(start, '%Y%m%d')
+    date = datetime.strptime(START, '%Y%m%d')
     lv_date = date
     tsv_date = date
 
     leap = 0
-    if calendar.isleap(year):
+    if calendar.isleap(YEAR):
         leap = 1
 
     for i in range(DAYS_IN_YEAR+leap):
         lv_date = (lv_date + timedelta(days=1))
         r_date = lv_date.strftime('%Y%m%d')
-        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, r_date)):
-            os.rename(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, r_date),
-                      LOCAL_PATH + '%s_%s_Live_DE_15_49_mG_old.csv' % (start, r_date))
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, r_date)):
+            os.rename(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, r_date),
+                      LOCAL_PATH + '%s_%s_Live_DE_15_49_mG_old.csv' % (START, r_date))
             break
 
     for i in range(DAYS_IN_YEAR+leap):
         tsv_date = (tsv_date + timedelta(days=1))
         ir_date = tsv_date.strftime('%Y%m%d')
-        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, ir_date)):
-            os.rename(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, ir_date),
-                      LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG_old.csv' % (start, ir_date))
+        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, ir_date)):
+            os.rename(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, ir_date),
+                      LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG_old.csv' % (START, ir_date))
             break
 
 
@@ -158,20 +161,17 @@ def create_live_facts_table():
     logging.info('Creating live facts table')
 
     cond = False
-    year = datetime.now().year + ADJUST_YEAR
-    month = datetime.now().month
-    day = datetime.now().day
 
-    end = str(year) + str(month) + str(day)
-    start = str(year) + '0101'
+    end = str(YEAR) + str(MONTH) + str(DAY)
+    start = str(YEAR) + '0101'
     if ADJUST_YEAR < 0:
-        end = str(year) + '1231'
+        end = str(YEAR) + '1231'
 
     end_date = datetime.strptime(end, '%Y%m%d')
     date = datetime.strptime(start, '%Y%m%d')
 
     leap = 0
-    if calendar.isleap(year):
+    if calendar.isleap(YEAR):
         leap = 1
 
     # Detection of checkpoint
@@ -195,7 +195,7 @@ def create_live_facts_table():
             dates.update([int(add)])
             date = date + timedelta(days=1)
 
-        pin_func_exp.update_live_facts_table(dates)
+        pin_functions.update_live_facts_table(dates)
 
         if cond:
             logging.info("Reached the end date successfully, finished live table")
@@ -212,26 +212,22 @@ def create_tsv_facts_table():
     logging.info('Creating tsv facts table')
 
     cond = False
-    year = datetime.now().year + ADJUST_YEAR
-    month = datetime.now().month
-    day = datetime.now().day
 
-    end = str(year) + str(month) + str(day)
-    start = str(year) + '0101'
+    end = str(YEAR) + str(MONTH) + str(DAY)
     if ADJUST_YEAR < 0:
-        end = str(year) + '1231'
+        end = str(YEAR) + '1231'
 
     end_date = datetime.strptime(end, '%Y%m%d')
-    date = datetime.strptime(start, '%Y%m%d')
+    date = datetime.strptime(START, '%Y%m%d')
 
     leap = 0
-    if calendar.isleap(year):
+    if calendar.isleap(YEAR):
         leap = 1
 
     # Detection of checkpoint
     for i in range(DAYS_IN_YEAR+leap):
         pot_date = (end_date + timedelta(days=i)).strftime('%Y%m%d')
-        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, pot_date)):
+        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, pot_date)):
             date = datetime.strptime(pot_date, '%Y%m%d') + timedelta(days=1)
             break
 
@@ -249,7 +245,7 @@ def create_tsv_facts_table():
             dates.update([int(add)])
             date = date + timedelta(days=1)
 
-        pin_func_exp.update_tsv_facts_table(dates)
+        pin_functions.update_tsv_facts_table(dates)
 
         if cond:
             logging.info("Reached the end date successfully, finished tsv table")
@@ -385,6 +381,6 @@ Task_create_tsv_facts_table = PythonOperator(
 # ----------------------------------------------------------------------------------------------------------------------
 # Schedule of the hard reset DAG
 Task_sleep >> Task_delete_all >> [Task_Weight_Download, Task_BrdCst_Download, Task_SocDem_Download,
-                                  Task_UsageLive_Download, Task_UsageTimeShifted_Download, Task_Irregular_Download] >> \
-Task_create_live_facts_table >> Task_create_tsv_facts_table
+                                  Task_UsageLive_Download, Task_UsageTimeShifted_Download, Task_Irregular_Download] \
+>> Task_create_live_facts_table >> Task_create_tsv_facts_table
 # ----------------------------------------------------------------------------------------------------------------------

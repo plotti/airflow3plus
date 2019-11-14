@@ -217,9 +217,8 @@ class SensorFactsTable(BaseSensorOperator):
         variables = AirflowVariables()
         days_in_year = variables.days_in_year
 
-        year = datetime.now().year
-        end = str(year) + '1231'
-        start = str(year) + '0101'
+        end = variables.end
+        start = variables.start
 
         end = datetime.strptime(end, '%Y%m%d')
 
@@ -235,4 +234,44 @@ class SensorFactsTable(BaseSensorOperator):
                     return True
 
         logging.info('No change detected in the facts table, no update required')
+        return False
+
+
+class SensorMostRecentUpdate(BaseSensorOperator):
+    """
+    Alerts the user if the facts table hasn't been updated in the last 4 days
+    Consequently the user should check if there is a problem with mediapulse or the ftp server
+    """
+    @apply_defaults
+    def __init__(
+            self,
+            local_path,
+            fail_on_transient_errors=True,
+            *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.local_path = local_path
+        self.fail_on_transient_errors = fail_on_transient_errors
+
+    def poke(self, context):
+
+        variables = AirflowVariables()
+        days_in_year = variables.days_in_year
+
+        end = variables.end
+        start = variables.start
+
+        end = datetime.strptime(end, '%Y%m%d')
+
+        for i in range(days_in_year):
+            date_old = (end - timedelta(days=i)).strftime('%Y%m%d')
+            if date_old == start:
+                break
+            if os.path.isfile(self.local_path + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_old)):
+                mod_time = os.path.getmtime(self.local_path + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_old))
+                last_mod = datetime.fromtimestamp(mod_time)
+                if last_mod > datetime.today() - timedelta(days=4):
+                    logging.info('The facts table was recently updated')
+                    return True
+
+        logging.info('The facts table has not been updated in the last for years, should have a look at the server')
         return False

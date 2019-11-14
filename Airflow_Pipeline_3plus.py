@@ -1,9 +1,10 @@
 import logging
-import pin_func_exp as pin_functions
 import json
 import os
 import hashlib
+import shutil
 
+import pin_functions
 import Sensors_3plus
 import Airflow_variables
 
@@ -81,11 +82,19 @@ SUFFIX = Airflow_var.suffix
 REGULAR_FILE_LIST = Airflow_var.regular_file_list
 IRREGULAR_FILE_LIST = Airflow_var.irregular_file_list
 SENSOR_IN_PAST = Airflow_var.sensor_in_past
+ADJUST_YEAR = Airflow_var.adjust_year
+DAYS_IN_YEAR = Airflow_var.days_in_year
 # Connections to the used servers, configurations can be found in the airflow webserver GUI or over the commandline
 FTP_CONN_ID = Airflow_var.ftp_conn_id
 SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
 # Slack connection ID
 SLACK_CONN_ID = Airflow_var.slack_conn_id
+# Time properties
+YEAR = Airflow_var.year
+MONTH = Airflow_var.month
+DAY = Airflow_var.day
+START = Airflow_var.start
+END_DAY = Airflow_var.end
 """
 Continue development of this system.
 Structure of this DAG:
@@ -112,7 +121,7 @@ def fail_slack_alert(context):
     """
     slack_webhook_token = BaseHook.get_connection(SLACK_CONN_ID).password
     slack_msg = """
-            :red_circle: Task Failed. 
+            :clown_face: Task Failed. 
             *Task*: {task}  
             *Dag*: {dag} 
             *Execution Time*: {exec_date}  
@@ -130,7 +139,8 @@ def fail_slack_alert(context):
         http_conn_id='slack',
         webhook_token=slack_webhook_token,
         message=slack_msg,
-        username='AirflowAlert')
+        username='AirflowAlert'
+    )
 
     return failed_alert.execute(context=context)
 
@@ -142,12 +152,11 @@ default_args = {
     'email': ['floosli@3plus.tv'],
     'email_on_failure': False,
     'email_on_retry': False,
-    'on_failure_callback': fail_slack_alert
 }
 # DAG Definition and various setting influencing the workflow of the DAG
 dag_3plus = DAG(dag_id=DAG_ID,
                 description='DAG used to automate the PIN data gathering of 3plus and to update modified files',
-                schedule_interval=timedelta(days=1),
+                schedule_interval='0 8,20 * * 1-5',
                 start_date=datetime(year=2019, month=10, day=15, hour=12),
                 end_date=None,
                 default_args=default_args,
@@ -348,6 +357,19 @@ def update_facts_tables():
     Updates both facts tables based on the remaining dates computed after the hashes has been compared
     :return: None
     """
+    pusher = xcom.XCom
+
+    END = datetime.strptime(END_DAY, '%Y%m%d')
+
+    for i in range(DAYS_IN_YEAR):
+        date_old = (END - timedelta(days=i)).strftime('%Y%m%d')
+        if date_old == START:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_old)):
+            pusher.set(key='newest_day', value=str(date_old), execution_date=datetime.now(timezone.utc),
+                       task_id='date_update', dag_id='dag_3plus')
+            break
+
     regular_dates = extract_regular_dates()
     irregular_dates = extract_irregular_dates()
 
@@ -359,14 +381,30 @@ def update_facts_tables():
     logging.info('Continuing with updating time-shifted facts-table')
     pin_functions.update_tsv_facts_table(dates)
 
-    pusher = xcom.XCom
+    for s in range(DAYS_IN_YEAR):
+        date_lv_old = (END - timedelta(days=s)).strftime('%Y%m%d')
+        if date_lv_old == START:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_lv_old)):
+            shutil.copy(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_lv_old),
+                        '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
+                        'updated_live_facts_table.csv')
+
+    for t in range(DAYS_IN_YEAR):
+        date_tsv_old = (END - timedelta(days=t)).strftime('%Y%m%d')
+        if date_tsv_old == START:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_tsv_old)):
+            shutil.copy(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_tsv_old),
+                        '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
+                        'updated_tsv_facts_table.csv')
+
     for date in dates:
         pusher.set(key='update', value=str(date), execution_date=datetime.now(timezone.utc),
                    task_id='date_update', dag_id='dag_3plus')
-    # TODO push new days as new day date old from somewhere
 
 
-def delete_content_temp_dir():
+def delete_content_temp_dir(**kwargs):
     """
     Delete content of the temp folder such that it returns to an empty state
     :return: None
@@ -418,6 +456,7 @@ Task_Download_Regular_Files = PythonOperator(
     retry_delay=timedelta(seconds=5),
     execution_timeout=timedelta(minutes=2),
     priority_weight=2,
+    on_failure_callback=fail_slack_alert,
     dag=dag_3plus
 )
 
@@ -453,6 +492,7 @@ Task_Download_Irregular_Files = PythonOperator(
     retry_delay=timedelta(seconds=5),
     execution_timeout=timedelta(minutes=1),
     priority_weight=2,
+    on_failure_callback=fail_slack_alert,
     dag=dag_3plus
 )
 
@@ -483,16 +523,18 @@ Task_Delete_Xcom_Variables = SqliteOperator(
     sql="delete from xcom where task_id='date_push'",
     sqlite_conn_id=SQL_ALCHEMY_CONN,
     trigger_rule='all_done',
+    on_failure_callback=fail_slack_alert,
     dag=dag_3plus
 )
 # Delete the content of the temp dir for a rounded execution and no remaining files in future iteration
 Task_Delete_Content_temp_dir = PythonOperator(
     task_id='Delete_content_temp_dir',
-    provide_context=False,
+    provide_context=True,
     python_callable=delete_content_temp_dir,
     retries=5,
     retry_delay=timedelta(seconds=5),
     execution_timeout=timedelta(minutes=1),
+    on_failure_callback=fail_slack_alert,
     dag=dag_3plus
 )
 
