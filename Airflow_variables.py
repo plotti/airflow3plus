@@ -67,8 +67,9 @@ class AirflowVariables:
 
         self.shows_4plus = [['The Big Bang Theory', '4+'], ['Steel Buddies - Stahlharte Geschäfte', '4+'],
                             ['C.S.I. - Tatort Las Vegas', '4+'], ['Mein peinlicher Sex-Unfall', '4+'],
-                            ['King of Queens ', '4+'], ['9-1-1', '4+'], ['The Blacklist', '4+'],
-                            ['Wild Card', '4+'], ['Ein Zwilling kommt selten allein', '4+'], ['Young Sheldon', '4+']]
+                            ['King of Queens', '4+'], ['9-1-1', '4+'], ['The Blacklist', '4+'],
+                            ['CSI: NY', '4+'], ['Notruf - Retter im Einsatz', '4+'],
+                            ['Young Sheldon', '4+']]
 
         self.shows_5plus = [['Steel Buddies - Stahlharte Geschäfte', '5+'], ['Navy CIS', '5+'],
                             ['Bones - Die Knochenjägerin', '5+'], ['Hawaii Five-0', '5+'],
@@ -79,7 +80,8 @@ class AirflowVariables:
         self.shows_6plus = [['Criminal Minds', '6+'], ['Navy CIS: L.A.', '6+'], ['Die Modellbauer - Das Duell', '6+'],
                             ['Camping Paradiso Grandioso', '6+'],
                             ['Jung, wild & sexy - Baggern, saufen, Party machen', '6+'], ['Superstar', '6+'],
-                            ['CSI:Cyber', '6+'], ['Die geheimen Akten der NASA', '6+'], ['Flugzeug-Katastrophen', '6+']]
+                            ['CSI: Cyber', '6+'], ['Die geheimen Akten der NASA', '6+'],
+                            ['Flugzeug-Katastrophen', '6+']]
 
         self.shows_TV24 = [['Die Aquarium-Profis', 'TV24'], ['Border Control - Spaniens Grenzschützer', 'TV24'],
                            ['Timber Kings - Blockhaus-Paläste XXL', 'TV24'], ['Die Höhle der Löwen Schweiz', 'TV24'],
@@ -88,13 +90,13 @@ class AirflowVariables:
 
         self.shows_TV25 = [['King of Queens', 'TV25'], ['Pawn Stars - Die Drei vom Pfandhaus', 'TV25'],
                            ['CSI: Miami', 'TV25'], ['Die Nanny', 'TV25'], ['Die Simpsons', 'TV25'],
-                           ['Der Letzte Bulle', 'TV25'], ['Auction Hunters - Zwei Asse machen Kasse', 'TV25'],
+                           ['Auction Hunters - Zwei Asse machen Kasse', 'TV25'],
                            ['Criminal Minds', 'TV25'], ['The Good Doctor', 'TV25'],
                            ['Mountain Life - Traumhaus gesucht', 'TV25']]
 
         self.shows_S1 = [['The First 48 - Am Tatort mit den US-Ermittlern', 'S1'],
                          ['Law & Order: Special Victims Unit', 'S1'],
-                         ['Fang des Lebens - Der gefährlichste Job Alaskas ', 'S1'],
+                         ['Fang des Lebens - Der gefährlichste Job Alaskas', 'S1'],
                          ['Stalked - Leben in Angst', 'S1'], ['Eine schrecklich nette Familie', 'S1'],
                          ['Rick der Restaurator', 'S1'], ['Hard Time', 'S1'], ['Diggers - Die Schatzsucher', 'S1'],
                          ['Überleben!', 'S1'], ['Super-Fabriken', 'S1']]

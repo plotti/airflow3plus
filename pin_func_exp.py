@@ -2,7 +2,14 @@ import datetime
 import pandas as pd
 import logging
 import os
-from Airflow_Utils import Airflow_variables
+import Airflow_variables
+import smtplib
+import glob
+
+from email.mime.multipart import MIMEMultipart
+from os.path import basename
+from email.mime.application import MIMEApplication
+from email.mime.text import MIMEText
 
 from datetime import timedelta, datetime
 from collections import Counter
@@ -17,18 +24,12 @@ operations are direct consequence of infosys data architecture, as an example th
 Airflow_var = Airflow_variables.AirflowVariables()
 # Some global variables
 LOCAL_PATH = Airflow_var.local_path
-VORWOCHE_PATH = Airflow_var.vorwoche_path
 DAYS_IN_YEAR = Airflow_var.days_in_year
 TSV_DAYS = Airflow_var.days_tsv
 ADJUST_YEAR = Airflow_var.adjust_year
 TABLES_PATH = Airflow_var.table_viewers_path
 CHANNELS = Airflow_var.relevant_channels
 CHANNELS_OF_INTEREST = Airflow_var.channels_of_interest
-YEAR = Airflow_var.year
-MONTH = Airflow_var.month
-DAY = Airflow_var.day
-START = Airflow_var.start
-END_DAY = Airflow_var.end
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -38,16 +39,20 @@ END_DAY = Airflow_var.end
 def get_live_facts_table():
 
     date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
-    END = datetime.strptime(END_DAY, '%Y%m%d')
+
+    year = datetime.now().year + ADJUST_YEAR
+    start = str(year) + '0101'
+    end = str(year) + '1231'
+    end = datetime.strptime(end, '%Y%m%d')
 
     df = pd.DataFrame()
     i = 0
     for i in range(DAYS_IN_YEAR):
-        date_old = (END - timedelta(days=i)).strftime('%Y%m%d')
-        if date_old == START:
+        date_old = (end - timedelta(days=i)).strftime('%Y%m%d')
+        if date_old == start:
             break
-        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_old)):
-            df = pd.read_csv(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_old), parse_dates=date_cols,
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_old)):
+            df = pd.read_csv(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_old), parse_dates=date_cols,
                              dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
                                     'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
                                     'station': str})
@@ -57,18 +62,23 @@ def get_live_facts_table():
 
 def get_tsv_facts_table():
 
-    delayed_date_cols = ['ViewingStartTime', 'ViewingTime', 'RecordingStartTime', 'show_endtime',
+    delayed_date_cols = ['ViewingStartTime', 'ViewingTime',
+                         'RecordingStartTime', 'show_endtime',
                          'show_starttime', 'RecordingEndTime']
-    END = datetime.strptime(END_DAY, '%Y%m%d')
+    year = datetime.now().year + ADJUST_YEAR
+    start = str(year) + '0101'
+    end = str(year) + '1231'
+    end = datetime.strptime(end, '%Y%m%d')
+
     # Read the old file in and update dates with day from latest update
     df = pd.DataFrame()
     i = 0
     for i in range(DAYS_IN_YEAR):
-        date_old = (END - timedelta(days=i)).strftime('%Y%m%d')
-        if date_old == START:
+        date_old = (end - timedelta(days=i)).strftime('%Y%m%d')
+        if date_old == start:
             break
-        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_old)):
-            df = pd.read_csv(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_old),
+        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, date_old)):
+            df = pd.read_csv(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, date_old),
                              parse_dates=delayed_date_cols, dtype={'Description': str, 'H_P': str,
                                                                    'HouseholdId': int, 'IndividualId': int,
                                                                    'Kanton': int, 'Platform': int, 'StationId': int,
@@ -79,27 +89,6 @@ def get_tsv_facts_table():
                                                                    'station': str})
             break
     return df, i
-
-
-def get_older_facts_table():
-
-    date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
-    df_2018_lv = pd.read_csv(LOCAL_PATH + '20180101_20181231_Live_DE_15_49_mG.csv', parse_dates=date_cols,
-                             dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
-                                    'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
-                                    'station': str})
-
-    delayed_date_cols = ['ViewingStartTime', 'ViewingTime', 'RecordingStartTime', 'show_endtime',
-                         'show_starttime', 'RecordingEndTime']
-    df_2018_tsv = pd.read_csv(LOCAL_PATH + '20180101_20181231_delayedviewing_DE_15_49_mG.csv',
-                              parse_dates=delayed_date_cols,
-                              dtype={'Description': str, 'H_P': str, 'HouseholdId': int, 'IndividualId': int,
-                                     'Kanton': int, 'Platform': int, 'StationId': int, 'Title': str, 'TvSet': int,
-                                     'Weights': float, 'UsageDate': int, 'ViewingActivity': int, 'age': int,
-                                     'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
-                                     'station': str})
-
-    return df_2018_lv, df_2018_tsv
 
 
 def get_kanton_dict(date):
@@ -424,6 +413,11 @@ def update_tsv_facts_table(dates):
     :param dates: Series of int dates which have to be updated on the table
     :return: None
     """
+    year = datetime.now().year + ADJUST_YEAR
+    start = str(year) + '0101'
+    end = str(year) + '1231'
+    end = datetime.strptime(end, '%Y%m%d')
+
     df_old, i = get_tsv_facts_table()
 
     # Remove updated entries from the old file
@@ -431,7 +425,7 @@ def update_tsv_facts_table(dates):
         # Check if older entries exist of files which are present, otherwise update them
         for k in range(DAYS_IN_YEAR):
             date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
-            if date == START:
+            if date == start:
                 break
             if date not in df_old['date'].values:
                 dates.update([str(date)])
@@ -488,19 +482,18 @@ def update_tsv_facts_table(dates):
     # Concatenate update with old file
     df_updated = pd.concat([df_old, df_update], axis=0, ignore_index=False, sort=True)
     df_updated['date'] = pd.to_numeric(df_updated['date'], downcast='integer')
-    df_updated.to_csv(f'{LOCAL_PATH}{START}_{int(df_updated["date"].max())}_delayedviewing_DE_15_49_mG.csv',
+    df_updated.to_csv(f'{LOCAL_PATH}{start}_{int(df_updated["date"].max())}_delayedviewing_DE_15_49_mG.csv',
                       index=False)
 
     # Delete redundant files from directory
     newest = False
-    END = datetime.strptime(END_DAY, '%Y%m%d')
     for g in range(DAYS_IN_YEAR):
-        date_new = (END - timedelta(days=g)).strftime('%Y%m%d')
-        if date_new == START:
+        date_new = (end - timedelta(days=g)).strftime('%Y%m%d')
+        if date_new == start:
             break
-        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_new)):
+        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, date_new)):
             if newest:
-                os.remove((LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_new)))
+                os.remove((LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, date_new)))
             else:
                 newest = True
 
@@ -689,6 +682,11 @@ def update_live_facts_table(dates):
     :param dates: Date to update the entries in the facts table
     :return: None
     """
+    year = datetime.now().year + ADJUST_YEAR
+    start = str(year) + '0101'
+    end = str(year) + '1231'
+    end = datetime.strptime(end, '%Y%m%d')
+
     df_old, i = get_live_facts_table()
 
     # Remove updated entries from the old file
@@ -696,7 +694,7 @@ def update_live_facts_table(dates):
         # Check if older entries exist, otherwise update them
         for k in range(DAYS_IN_YEAR):
             date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
-            if date == START:
+            if date == start:
                 break
             if date not in df_old['date'].values:
                 dates.update([str(date)])
@@ -747,18 +745,18 @@ def update_live_facts_table(dates):
     # Concatenate update with old file
     df_updated = pd.concat([df_old, df_update], axis=0, ignore_index=False, sort=True)
     df_updated['date'] = pd.to_numeric(df_updated['date'], downcast='integer')
-    df_updated.to_csv(f'{LOCAL_PATH}{START}_{int(df_updated["date"].max())}_Live_DE_15_49_mG.csv', index=False)
+    df_updated.to_csv(f'{LOCAL_PATH}{start}_{int(df_updated["date"].max())}_Live_DE_15_49_mG.csv', index=False)
 
     # Delete redundant files from directory
     newest = False
-    END = datetime.strptime(END_DAY, '%Y%m%d')
+
     for g in range(DAYS_IN_YEAR):
-        date_new = (END - timedelta(days=g)).strftime('%Y%m%d')
-        if date_new == START:
+        date_new = (end - timedelta(days=g)).strftime('%Y%m%d')
+        if date_new == start:
             break
-        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_new)):
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_new)):
             if newest:
-                os.remove((LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_new)))
+                os.remove((LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_new)))
             else:
                 newest = True
 
@@ -804,6 +802,7 @@ def compute_live_rt(path, station, path_comp_sol):
     :param path_comp_sol: Path where to save the resulting file
     :return: None
     """
+
     date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
 
     df_2019_live = pd.read_csv(path, parse_dates=date_cols)
@@ -823,6 +822,7 @@ def compute_tsv_rt(path, station, path_comp_sol):
     :param path_comp_sol: Path where to save the resulting file
     :return: None
     """
+
     delayed_date_cols = ['ViewingStartTime', 'ViewingTime', 'RecordingStartTime',
                          'show_endtime', 'show_starttime', 'RecordingEndTime']
 
@@ -892,10 +892,6 @@ def verify_tsv_table(path_comp_sol, path_infosys_sol, comparison_path):
 
 
 def see_if_correct():
-    """
-    Check if our computed facts table has the same values as the infosys facts table
-    :return: None
-    """
     compute_live_rt(path='/home/floosli/Documents/PIN_Data/20190101_20191030_Live_DE_15_49_mG.csv',
                     station='3+', path_comp_sol='/home/floosli/Documents/PIN_Data/solutions/live_rt_T_table')
     verify_live_table(path_comp_sol='/home/floosli/Documents/PIN_Data/solutions/live_rt_T_table',
@@ -910,3 +906,266 @@ def see_if_correct():
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+# TRANSFORMATION FUNCTIONS
+# Functions to transform the facts table to other representations
+# ----------------------------------------------------------------------------------------------------------------------
+def compute_viewers_for_channel(channel, dates):
+    """
+    Compute the viewers table for a given channel and for a given date
+    :param channel: Station to compute the table for, should be a string
+    :param dates: Day of which we want the table of is in for of a set of strings
+    :return: df of the new DataFrame
+    """
+    date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
+    delayed_date_cols = ['ViewingStartTime', 'ViewingTime', 'RecordingStartTime', 'show_endtime',
+                         'show_starttime', 'RecordingEndTime']
+    dates = list(dates)
+    year = datetime.now().year + ADJUST_YEAR
+    start = str(year) + '0101'
+    end = str(year) + '1231'
+    end = datetime.strptime(end, '%Y%m%d')
+
+    facts_lv = pd.DataFrame()
+    for i in range(DAYS_IN_YEAR):
+        date_old = (end - timedelta(days=i)).strftime('%Y%m%d')
+        if date_old == start:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_old)):
+            facts_lv = pd.read_csv(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (start, date_old), parse_dates=date_cols,
+                                   dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
+                                          'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
+                                          'station': str})
+            break
+
+    facts_ovn = pd.DataFrame()
+    for i in range(DAYS_IN_YEAR):
+        date_old = (end - timedelta(days=i)).strftime('%Y%m%d')
+        if date_old == start:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, date_old)):
+            facts_ovn = pd.read_csv(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (start, date_old),
+                                    parse_dates=delayed_date_cols, dtype={'Description': str, 'H_P': str,
+                                                                          'HouseholdId': int, 'IndividualId': int,
+                                                                          'Kanton': int, 'Platform': int,
+                                                                          'StationId': int, 'Title': str, 'TvSet': int,
+                                                                          'Weights': float, 'UsageDate': int,
+                                                                          'ViewingActivity': int, 'age': int,
+                                                                          'broadcast_id': int, 'duration': float,
+                                                                          'program_duration': int,
+                                                                          'station': str})
+
+    if facts_ovn.empty or facts_lv.empty:
+        logging.info('A facts table is empty please check for correct paths, unable to update, will exit')
+        exit()
+
+    if not dates:
+        logging.info('No dates to update')
+        exit()
+
+    df_lv = facts_lv.copy()
+    df_ovn = facts_ovn.copy()
+    # Filter for updated live facts
+    df_lv = df_lv.drop(columns=['EndTime', 'Kanton', 'StartTime', 'show_endtime',
+                                'show_starttime', 'Title', 'Description'])
+    df_lv = df_lv[df_lv['date'].isin(dates)]
+    df_lv = df_lv[df_lv['station'] == channel]
+    df_lv = df_lv[df_lv['program_duration'] >= 600]
+    df_lv['weighted_duration'] = df_lv['duration'] * df_lv['Weights']
+    # Filter for updated tsv facts
+    df_ovn = df_ovn.drop(columns=['Title', 'Description', 'HouseholdId', 'IndividualId', 'Kanton', 'Platform',
+                                  'RecordingDate', 'RecordingEndTime', 'RecordingStartTime', 'StationId',
+                                  'TvSet', 'UsageDate', 'ViewingActivity', 'ViewingStartTime', 'ViewingTime',
+                                  'age', 'show_endtime', 'show_starttime'])
+    df_ovn = df_ovn[df_ovn['date'].isin(dates)]
+    df_ovn = df_ovn[df_ovn['station'] == channel]
+    df_ovn = df_ovn[df_ovn['program_duration'] >= 600]
+    df_ovn['weighted_duration'] = df_ovn['duration'] * df_ovn['Weights']
+
+    table_hv = pd.concat([df_lv, df_ovn], join='inner', ignore_index=False)
+
+    table_hv = table_hv.groupby(by=['date', 'H_P', 'broadcast_id'])['weighted_duration'].sum()
+
+    org_table = pd.DataFrame()
+    if os.path.isfile(TABLES_PATH + 'table_viewers_pik_{}'.format(channel)):
+        org_table = pd.read_pickle(TABLES_PATH + 'table_viewers_pik_{}'.format(channel))
+        org_table = org_table.drop(labels=dates, level=0)
+
+    if org_table.size == 0:
+        table_hv.to_pickle(TABLES_PATH + 'table_viewers_pik_{}'.format(channel))
+    else:
+        new_table = pd.concat([org_table, table_hv], axis=0, join='outer', sort=False)
+        new_table.to_pickle(TABLES_PATH + 'table_viewers_pik_{}'.format(channel))
+
+
+def compute_complete_viewers_table():
+
+    year = datetime.now().year + ADJUST_YEAR
+    month = datetime.now().month
+    day = datetime.now().day
+
+    end = str(year) + str(month) + str(day)
+    start = str(year) + '0101'
+    if ADJUST_YEAR < 0:
+        end = str(year) + '1231'
+
+    date = datetime.strptime(start, '%Y%m%d')
+
+    dates = set()
+
+    for channel in CHANNELS:
+
+        for i in range(DAYS_IN_YEAR):
+            add = date.strftime('%Y%m%d')
+            if add == end:
+                dates.update([int(add)])
+                break
+            dates.update([int(add)])
+            date = date + timedelta(days=1)
+
+        compute_viewers_for_channel(channel, dates)
+        print('end of %s' % channel)
+# ----------------------------------------------------------------------------------------------------------------------
+
+
+def brcst_viewer_dict(df, date, group_chans):
+
+    cond = ((df['Date'] == date) & (df['station'].isin(group_chans)))
+    cols = ['broadcast_id', 'H_P']
+
+    return df[cond][cols].groupby(cols[0])[cols[1]].apply(list).to_dict()
+
+
+def flat(l):
+    return [o for subo in l for o in subo]
+
+
+def get_rt_from_vws(data, viewers):
+    return data[data['H_P'].isin(viewers)]['individual_Rt-T'].sum()
+
+
+def format_dataframe(broadcast_id, ratings_dict, show_format):
+    return pd.DataFrame().from_dict(ratings_dict, orient='index', columns=[show_format[broadcast_id]])
+
+
+def to_xl_multi_sheet(df, f, group_chans):
+
+    writer = pd.ExcelWriter(f, engine='xlsxwriter')
+    dfs = [df[[col for col in df.columns if chan in col]] for chan in group_chans]
+
+    for frame, chan in zip(dfs, group_chans):
+
+        frame.to_excel(writer, sheet_name=chan)  # send df to writer
+        worksheet = writer.sheets[chan]  # pull worksheet object
+
+        for idx, col in enumerate(frame):  # loop through all columns
+            series = df[col]
+            max_len = max((series.astype(str).map(len).max(),  # len of largest item
+                          len(str(series.name))  # len of column name/header
+                           )) + 1  # adding a little extra space
+            worksheet.set_column(idx, idx, max_len)  # set column width
+
+    writer.save()
+
+
+def send_mail(date, date_day_b4, date_week_b4, fname_day_b4, fname_week_b4):
+
+    COMMASPACE = ', '
+    msg = MIMEMultipart()
+    msg['Subject'] = f'[Vorwoche Zuschauer] Rt-T für {date},' \
+                     f' berechnet mit Zuschauern von {date_day_b4} und {date_week_b4}'
+    recipients = ['hb@3plus.tv', 'floosli@3plus.tv']
+    msg['From'] = 'Harold Bessis <hb@3plus.tv>'
+    msg['To'] = COMMASPACE.join(recipients)
+    body = f"Hallo Zusammen, \n\nIm Anhang findet Ihr die Rt-T für die Programme vom {date}," \
+           f"berechnet mit den Zuschauern von Programmen"
+    body += f" vom {date_day_b4} und {date_week_b4}. \n\nBeste Grüsse,\nHarold (automatic email)"
+    body = MIMEText(body)
+    msg.attach(body)
+
+    for file in [fname_day_b4, fname_week_b4]:
+        with open(file, 'rb') as f:
+            att = MIMEApplication(f.read(), Name=basename(file))
+            msg.attach(att)
+
+    s = smtplib.SMTP('10.3.3.103')
+    s.send_message(msg)
+    s.quit()
+
+
+def compute_zuschauer_vorwoche(date, df):
+
+    df = df[(df['show_starttime'].dt.hour.isin([18, 19, 20, 21, 22, 23]))
+            & (df['program_duration'] > 600)
+            & (df['station'].isin(CHANNELS_OF_INTEREST))]
+    df['broadcast_id'] = df['broadcast_id'].astype(int)
+
+    id_title_dict = (df[['broadcast_id', 'Title']].drop_duplicates().set_index('broadcast_id').to_dict()['Title'])
+
+    id_starttime_dict = (df[['broadcast_id', 'show_starttime']].drop_duplicates().groupby('broadcast_id').min()
+                         .to_dict()['show_starttime'])
+    id_starttime_dict = {k: v.strftime('%H:%M') for k, v in id_starttime_dict.items()}
+
+    id_chan_dict = (df[['broadcast_id', 'station']].drop_duplicates().set_index('broadcast_id')
+                    .to_dict()['station'])
+
+    show_format = {k: id_chan_dict[k] + " " + id_starttime_dict[k] + " " + id_title_dict[k] for k in id_chan_dict}
+
+    day_before = (date + datetime.timedelta(days=-1))
+    week_before = (date + datetime.timedelta(days=-7))
+
+    # dict of {broadcast_id : viewer_list} for each broadcast_id
+    # of 7 days ago for our group channels
+    brcst_to_viewers_week_b4 = brcst_viewer_dict(df, week_before, CHANNELS)
+
+    # dict of {broadcast_id : viewer_list} for each broadcast_id
+    # of 1 day ago for our group channels
+    brcst_to_viewers_day_b4 = brcst_viewer_dict(df, day_before, CHANNELS)
+
+    # For date == 'date', getting ratings for all programs of channels of interest
+    # using subsets of viewers from our group chans' programs, from day_before and last_week
+    viewers_of_interest = (set(flat(list(brcst_to_viewers_week_b4.values())))
+                           | set(flat(list(brcst_to_viewers_day_b4.values()))))
+    df_date = df[(df['Date'] == date) & (df['H_P'].isin(viewers_of_interest))].copy()
+
+    date_ratings_week_b4 = {}
+    date_ratings_day_b4 = {}
+
+    # Looping over yesterday's programs
+    for bcst_id, group in df_date.groupby('broadcast_id'):
+
+        week_b4 = {}
+        day_b4 = {}
+
+        # Computing yesterday's Rt-T using last week's viewers
+        for bcst_id_week_b4, viewers_week_b4 in brcst_to_viewers_week_b4.items():
+            week_b4[bcst_id_week_b4] = get_rt_from_vws(group, viewers_week_b4)
+
+        # Computing yesterday's Rt-T using the day before's viewers
+        for bcst_id_day_b4, viewers_day_b4 in brcst_to_viewers_day_b4.items():
+            day_b4[bcst_id_day_b4] = get_rt_from_vws(group, viewers_day_b4)
+
+        date_ratings_day_b4[bcst_id] = day_b4
+        date_ratings_week_b4[bcst_id] = week_b4
+
+    # Formatting the computations to dataframes
+    week_b4_data = []
+    for broadcast_id, ratings in date_ratings_week_b4.items():
+        week_b4_data.append(format_dataframe(broadcast_id, ratings, show_format))
+    week_b4 = pd.concat(week_b4_data, axis=1)
+    week_b4.index = week_b4.index.map(show_format)
+    week_b4 = week_b4.T
+
+    day_b4_data = []
+    for broadcast_id, ratings in date_ratings_day_b4.items():
+        day_b4_data.append(format_dataframe(broadcast_id, ratings, show_format))
+    day_b4 = pd.concat(day_b4_data, axis=1)
+    day_b4.index = day_b4.index.map(show_format)
+    day_b4 = day_b4.T
+
+    date_format = '%A %d.%m.%Y'
+    filename = "Rt from " + date.strftime(date_format) + " with viewers from "
+    filename_day_b4 = filename + day_before.strftime(date_format) + '.xlsx'
+    filename_week_b4 = filename + week_before.strftime(date_format) + '.xlsx'
+
+    to_xl_multi_sheet(day_b4, filename_day_b4, CHANNELS)
+    to_xl_multi_sheet(week_b4, filename_week_b4, CHANNELS)

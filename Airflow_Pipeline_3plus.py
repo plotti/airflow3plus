@@ -4,9 +4,7 @@ import os
 import hashlib
 import shutil
 
-import pin_functions
-import Sensors_3plus
-import Airflow_variables
+from Airflow_Utils import Airflow_variables, Sensors_3plus, pin_functions
 
 from datetime import datetime, timedelta, timezone
 from shutil import copyfile
@@ -547,4 +545,6 @@ Task_Delete_Content_temp_dir = PythonOperator(
 Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Update_Facts_Table
 Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Update_Facts_Table
 Task_Update_Facts_Table >> Task_Delete_Xcom_Variables >> Task_Delete_Content_temp_dir
+
+
 # ----------------------------------------------------------------------------------------------------------------------

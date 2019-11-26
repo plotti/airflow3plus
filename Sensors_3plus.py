@@ -9,7 +9,7 @@ from airflow.models import xcom
 from airflow.operators.sensors import BaseSensorOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.contrib.hooks.ftp_hook import FTPHook
-from Airflow_variables import AirflowVariables
+from Airflow_Utils.Airflow_variables import AirflowVariables
 """
 Both Sensor check for newly created files and push a xcom variable of a date or a boolean on the database
 depending on the type of the file. Regular files push a date and irregular files push a boolean.

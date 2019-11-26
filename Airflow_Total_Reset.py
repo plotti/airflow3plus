@@ -2,9 +2,8 @@ import time
 import shutil
 import logging
 import os
-import pin_functions
 import calendar
-import Airflow_variables
+from Airflow_Utils import Airflow_variables, pin_functions
 
 from airflow.models import DAG
 from airflow.operators.python_operator import PythonOperator
@@ -383,4 +382,6 @@ Task_create_tsv_facts_table = PythonOperator(
 Task_sleep >> Task_delete_all >> [Task_Weight_Download, Task_BrdCst_Download, Task_SocDem_Download,
                                   Task_UsageLive_Download, Task_UsageTimeShifted_Download, Task_Irregular_Download] \
 >> Task_create_live_facts_table >> Task_create_tsv_facts_table
+
+
 # ----------------------------------------------------------------------------------------------------------------------

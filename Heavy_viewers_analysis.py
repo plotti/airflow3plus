@@ -1,6 +1,5 @@
 import pandas as pd
-import Airflow_variables
-import pin_functions
+from Airflow_Utils import Airflow_variables, pin_functions
 import itertools
 import numpy as np
 """
@@ -221,7 +220,7 @@ def analyse_heavy_viewers():
     results.index.names = ['channel', 'show']
     results = results.reset_index(drop=False)
     results = results.round(decimals=2)
-    writer = pd.ExcelWriter('/home/floosli/Documents/Heavy_Viewers_StealPot/' + 'table_heavy_viewers_stealing.xlsx',
+    writer = pd.ExcelWriter(STEAL_POT_PATH + 'table_heavy_viewers_stealing.xlsx',
                             engine='xlsxwriter')
     results.to_excel(writer, sheet_name='report_hv')
 
@@ -233,29 +232,3 @@ def analyse_heavy_viewers():
         worksheet.set_column(idx, idx, max_len)
 
     writer.save()
-
-
-def filter_stealing_table(df, channel, show, only_other_channels=False):
-
-    df_chan = df.copy().reset_index()
-    df_chan = df_chan.rename(columns={'index': 'Potential steals from'})
-
-    try:
-        name = '{} {}'.format(channel, show)
-        if only_other_channels:
-            df_chan = df_chan[~df_chan['channel'].str.contains(channel)]
-        return df_chan.nlargest(10, columns=[name])[['channel', 'show', name]]
-
-    except KeyError as e:
-        print('{}, {} has no show called {}'.format(e, channel, show))
-        return pd.DataFrame()
-
-
-def create_report_potsteal():
-    # maximize on row?
-    df_excel = pd.read_excel(STEAL_POT_PATH + 'table_heavy_viewers_stealing.xlsx', header=0, index_col=0)
-    print(filter_stealing_table(df_excel, '6+', 'Superstar', True).reset_index(drop=True))
-
-
-# analyse_heavy_viewers()
-# create_report_potsteal()

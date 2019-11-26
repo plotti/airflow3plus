@@ -1,7 +1,6 @@
 import datetime
 import pandas as pd
-import Airflow_variables
-import pin_functions
+from Airflow_Utils import Airflow_variables, pin_functions
 import logging
 import smtplib
 import os
@@ -31,7 +30,7 @@ END = Airflow_var.end
 The functions defined in this filed are used to transform the facts tables and generate useful reports 
 for various departments in the CH Media group.
 The automation of the generation of the reports is done via a Airflow pipeline defined 
-in the Airflow_Transformation_Table.py. Most reports are updated daily, some have a different schedule.
+in the Airflow_Daily_Reports.py. Most reports are updated daily, some have a different schedule.
 For additional reports implement them in the according DAG for maintainability
 """
 
@@ -332,5 +331,6 @@ def compute_zuschauer_vorwoche(df, date):
     send_mail(*(map(lambda x: x.strftime(date_format), [date, day_before, week_before])),
               filename_day_b4, filename_week_b4)
 
-
+    os.remove(filename_day_b4)
+    os.remove(filename_week_b4)
 # ----------------------------------------------------------------------------------------------------------------------
