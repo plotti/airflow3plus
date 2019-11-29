@@ -9,7 +9,7 @@ from airflow.models import xcom
 from airflow.operators.sensors import BaseSensorOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.contrib.hooks.ftp_hook import FTPHook
-from Airflow_Utils.Airflow_variables import AirflowVariables
+from Airflow_Variables import AirflowVariables
 """
 Both Sensor check for newly created files and push a xcom variable of a date or a boolean on the database
 depending on the type of the file. Regular files push a date and irregular files push a boolean.
@@ -81,7 +81,7 @@ class SensorRegularFiles(BaseSensorOperator):
                         server_mod_time = hook.get_mod_time(server_full_path)
 
                         if not os.path.isfile(local_full_path):
-                            pusher.set(key=name + '_date', value=date, execution_date=datetime.now(timezone.utc),
+                            pusher.set(key=name + '_date', value=str(date), execution_date=datetime.now(timezone.utc),
                                        task_id='date_push', dag_id='dag_3plus')
                             self.log.info('New file found: %s', name)
                             update = True
@@ -89,7 +89,7 @@ class SensorRegularFiles(BaseSensorOperator):
 
                         present_mod = datetime.fromtimestamp(os.path.getmtime(local_full_path))
                         if present_mod < server_mod_time:
-                            pusher.set(key=name + '_date', value=date, execution_date=datetime.now(timezone.utc),
+                            pusher.set(key=name + '_date', value=str(date), execution_date=datetime.now(timezone.utc),
                                        task_id='date_push', dag_id='dag_3plus')
                             self.log.info('Update found for %s', name)
                             update = True

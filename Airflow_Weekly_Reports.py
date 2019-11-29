@@ -1,36 +1,36 @@
-from Airflow_Utils import Airflow_variables
-from Weekly_Reports import Heavy_viewers_analysis, Plotly_graph_heavy_viewers
+import Airflow_Variables
+import Transformations_Weekly_Reports
+import Plotly_Graph_Heavy_Viewers
 import smtplib
 import logging
+import os
+import shutil
 
-from airflow.models import DAG
+from airflow.models import DAG, xcom
 from airflow.operators.python_operator import PythonOperator
 from airflow.hooks.base_hook import BaseHook
+from airflow.operators.sqlite_operator import SqliteOperator
 from airflow.contrib.operators.slack_webhook_operator import SlackWebhookOperator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from email.mime.text import MIMEText
 
 DAG_ID = 'dag_weekly_reports'
-Airflow_var = Airflow_variables.AirflowVariables()
+Airflow_var = Airflow_Variables.AirflowVariables()
 # Global variables used in this file
 SLACK_CONN_ID = Airflow_var.slack_conn_id
-LOCAL_PATH = Airflow_var.local_path
-TABLES_PATH = Airflow_var.table_viewers_path
-ADJUST_YEAR = Airflow_var.adjust_year
-DAYS_IN_YEAR = Airflow_var.days_in_year
-CHANNELS = Airflow_var.relevant_channels
 SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
-CHANNELS_OF_INTEREST = Airflow_var.channels_of_interest
-YEAR = Airflow_var.year
-MONTH = Airflow_var.month
-DAY = Airflow_var.day
+LOCAL_PATH = Airflow_var.local_path
+HV_STEAL_PATH = Airflow_var.steal_pot_path
+HEATMAP_PATH = Airflow_var.heatmap_path
+DAYS_IN_YEAR = Airflow_var.days_in_year
 START = Airflow_var.start
 END_DAY = Airflow_var.end
 """
-This Dag is used to automize the generating reports that are required weekly.
+This Dag is used to generate reports that are required weekly. Such as the Heatmap of zapping and 
+the HeavyViewersTool to optimize cross promotion.
 """
 
 
@@ -78,7 +78,7 @@ default_args = {
 # DAG Definition and various setting influencing the workflow of the DAG
 dag_weekly_reports = DAG(dag_id=DAG_ID,
                          description='DAG to update the viewers table for shows',
-                         schedule_interval='0 12 * * 1',
+                         schedule_interval='0 21 * * 2',
                          start_date=datetime(year=2019, month=10, day=15, hour=14),
                          end_date=None,
                          default_args=default_args,
@@ -90,16 +90,94 @@ dag_weekly_reports = DAG(dag_id=DAG_ID,
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def update_heatmap_week():
+    """
+    Update the heatmap for last week. Determine which are the new dates to be updated
+    :return: None
+    """
+    recent_day = START
+    END = datetime.strptime(END_DAY, '%Y%m%d')
+    for i in range(DAYS_IN_YEAR):
+        recent_day = (END - timedelta(days=i)).strftime('%Y%m%d')
+        if recent_day == START:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, recent_day)):
+            break
+
+    puller = xcom.XCom
+
+    oldest = puller.get_one(key='oldest_day', execution_date=datetime.now(timezone.utc), dag_id='dag_weekly_reports',
+                            include_prior_dates=True)
+
+    start = datetime.strptime(oldest, '%Y%m%d')
+    date = datetime.strptime(recent_day, '%Y%m%d')
+    dates = set()
+    while True:
+        if date <= start:
+            break
+        dates.update({date.strftime('%Y%m%d')})
+        date -= timedelta(days=1)
+
+    if not dates:
+        logging.info('No dates have to be updated, exiting')
+        exit()
+
+    logging.info('Updating following dates: %s' % dates)
+    for days in dates:
+        try:
+            Transformations_Weekly_Reports.update_heatmap(str(days), threshold_duration=False)
+        except FileNotFoundError as e:
+            logging.info(str(e))
+            continue
+
+    for days in dates:
+        try:
+            Transformations_Weekly_Reports.update_heatmap(str(days), threshold_duration=True)
+        except FileNotFoundError as e:
+            logging.info(str(e))
+            continue
+
+    logging.info('Picklefile has been updated, can be uploaded from Dash')
+    shutil.copy(HEATMAP_PATH + 'data_heatmap_chmedia.pkl',
+                '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/'
+                'P38 Zapping sequences clustering (Heatmaps & more)/data_heatmap_chmedia.pkl')
+
+    shutil.copy(HEATMAP_PATH + 'data_heatmap_chmedia_threshold.pkl',
+                '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/'
+                'P38 Zapping sequences clustering (Heatmaps & more)/data_heatmap_chmedia_threshold.pkl')
+
+
+def xcom_push_oldest():
+    """
+    Push the current date of the newest version of the facts table.
+    Used to keep track of which days need to be updated every week
+    :return: None
+    """
+    pusher = xcom.XCom
+    recent_day = START
+    END = datetime.strptime(END_DAY, '%Y%m%d')
+    for i in range(DAYS_IN_YEAR):
+        recent_day = (END - timedelta(days=i)).strftime('%Y%m%d')
+        if recent_day == START:
+            break
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, recent_day)):
+            break
+
+    pusher.set(key='oldest_day', value=str(recent_day), execution_date=datetime.now(timezone.utc),
+               task_id='Oldest_Push', dag_id='dag_weekly_reports')
+    logging.info('Pushed the date of the facts table as xcom variable: value %s' % recent_day)
+
+
 def create_heavy_viewer_report():
     """
     Create the excel Matrix of the HeavyViewersStealPotential and generate the
     Plotly Table based on the excel file.
     :return: None
     """
-    Heavy_viewers_analysis.analyse_heavy_viewers()
+    Transformations_Weekly_Reports.analyse_heavy_viewers()
     logging.info('Created the excel file of all the values')
 
-    Plotly_graph_heavy_viewers.generate_plotly_table()
+    Plotly_Graph_Heavy_Viewers.generate_plotly_table()
     logging.info('Created the plotly table and saved it locally as html file')
 
 
@@ -110,8 +188,9 @@ def send_mail_plotly_graph():
     """
     COMMASPACE = ', '
     msg = MIMEMultipart()
-    msg['Subject'] = f'HeavyViewersTool Updated Version'
-    recipients = ['floosli@3plus.tv', 'hb@3plus.tv']
+    msg['Subject'] = f'[HeavyViewersTool] Updated Version'
+    recipients = ['floosli@3plus.tv', 'hb@3plus.tv', 'LHE@3plus.tv']  # , 'TP@3plus.tv', 'KH@3plus.tv', 'hb@3plus.tv',
+    # 'plotti@gmx.net', 'LHE@3plus.tv', 'Ute.vonMoers@chmedia.ch'] # TODO
     msg['From'] = 'Harold Bessis <hb@3plus.tv>'
     msg['To'] = COMMASPACE.join(recipients)
     body = f"Hallo Zusammen, \n\nIm Anhang findet Ihr das HeavyViewersTool mit den aktualisierten Werten,"
@@ -119,11 +198,11 @@ def send_mail_plotly_graph():
     body = MIMEText(body)
     msg.attach(body)
 
-    with open('/home/floosli/Documents/Heavy_Viewers_StealPot/HeavyViewersTool.html', 'rb') as f:
-        att = MIMEApplication(f.read(), Name='HeavyViewersTool')
+    with open(HV_STEAL_PATH + 'HeavyViewersTool.html', 'rb') as f:
+        att = MIMEApplication(f.read(), Name='HeavyViewersTool.html')
         msg.attach(att)
 
-    s = smtplib.SMTP('10.3.3.103')
+    s = smtplib.SMTP(host='10.3.3.103', port=25)
     s.send_message(msg)
     s.quit()
     logging.info('The email has been sent, the receivers will be notified shortly')
@@ -135,12 +214,11 @@ Task_Generate_Plotly_Tool = PythonOperator(
     provide_context=False,
     python_callable=create_heavy_viewer_report,
     retries=3,
-    retry_delay=timedelta(minutes=3),
+    retry_delay=timedelta(minutes=1),
     execution_timeout=timedelta(hours=1),
     priority_weight=1,
     dag=dag_weekly_reports
 )
-
 
 Task_Send_Mail = PythonOperator(
     task_id='Send_Mail',
@@ -151,15 +229,47 @@ Task_Send_Mail = PythonOperator(
     execution_timeout=timedelta(hours=1),
     priority_weight=1,
     trigger_rule='all_success',
+    on_failure_callback=fail_slack_alert,
     dag=dag_weekly_reports
 )
 
+Task_Update_Heatmap = PythonOperator(
+    task_id='Update_Heatmap',
+    provide_context=False,
+    python_callable=update_heatmap_week,
+    retries=3,
+    retry_delay=timedelta(minutes=1),
+    execution_timeout=timedelta(hours=2),
+    priority_weight=1,
+    trigger_rule='all_success',
+    dag=dag_weekly_reports
+)
+
+Task_Delete_Xcom_Oldest = SqliteOperator(
+    task_id='Delete_xcom_oldest_push',
+    sql="delete from xcom where task_id='Oldest_Push'",
+    sqlite_conn_id=SQL_ALCHEMY_CONN,
+    trigger_rule='all_done',
+    on_failure_callback=fail_slack_alert,
+    dag=dag_weekly_reports
+)
+
+Task_Push_Oldest_Xcom = PythonOperator(
+    task_id='Oldest_Push',
+    provide_context=False,
+    python_callable=xcom_push_oldest,
+    retries=2,
+    retry_delay=timedelta(minutes=3),
+    execution_timeout=timedelta(hours=1),
+    trigger_rule='all_success',
+    on_failure_callback=fail_slack_alert,
+    dag=dag_weekly_reports
+)
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Schedule of Tasks
 Task_Generate_Plotly_Tool >> Task_Send_Mail
-
+Task_Update_Heatmap >> Task_Delete_Xcom_Oldest >> Task_Push_Oldest_Xcom
 
 # ----------------------------------------------------------------------------------------------------------------------
-create_heavy_viewer_report()
-send_mail_plotly_graph()
+

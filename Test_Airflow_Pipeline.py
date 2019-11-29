@@ -1,7 +1,7 @@
 import unittest
 import os
 
-from Airflow_Utils import pin_functions
+import Pin_Functions
 from Daily_Reports import Airflow_Pipeline_3plus
 
 from airflow.models import DagBag
@@ -115,11 +115,11 @@ class TestDAG3plusPythonMethods(unittest.TestCase):
 class TestPINfunctions(unittest.TestCase):
 
     def test_get_kanton_dict(self):
-        kanton_dict = pin_functions.get_kanton_dict('20190101')
+        kanton_dict = Pin_Functions.get_kanton_dict('20190101')
         self.assertTrue(kanton_dict['9_1'] == 23)
 
     def test_get_station_dict(self):
-        station_dict = pin_functions.get_station_dict()
+        station_dict = Pin_Functions.get_station_dict()
         self.assertTrue(station_dict[8216] == '3+' and station_dict[8636] == 'TV24')
 
 

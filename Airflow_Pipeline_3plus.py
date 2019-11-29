@@ -4,7 +4,9 @@ import os
 import hashlib
 import shutil
 
-from Airflow_Utils import Airflow_variables, Sensors_3plus, pin_functions
+import Sensors_3plus
+import Pin_Functions
+import Airflow_Variables
 
 from datetime import datetime, timedelta, timezone
 from shutil import copyfile
@@ -21,7 +23,7 @@ Used airflow version for development 1.10.5
 A scheduling system based on the Airflow library. We'd like to update locally saved files daily and
 generate enriched reports and tables based on the new entries.
 The 3plus_dag is the defined DAG in which all the task are unraveled and scheduled.
-Most Python_functions used in the PythonOperators are defined in the accompanied file pin_functions.py
+Most Python_functions used in the PythonOperators are defined in the accompanied file Pin_Functions.py
 for clearer maintainability add additional functions in the previously mentioned file or create new ones.
 
 Install airflow:
@@ -71,7 +73,7 @@ any circles. If you have task defined but not in the schedule they will still be
 you have to comment them out or delete them if this behaviour is not desired
 """
 DAG_ID = 'dag_3plus'
-Airflow_var = Airflow_variables.AirflowVariables()
+Airflow_var = Airflow_Variables.AirflowVariables()
 # Global variables used in the DAG
 REMOTE_PATH = Airflow_var.remote_path
 LOCAL_PATH = Airflow_var.local_path
@@ -80,7 +82,6 @@ SUFFIX = Airflow_var.suffix
 REGULAR_FILE_LIST = Airflow_var.regular_file_list
 IRREGULAR_FILE_LIST = Airflow_var.irregular_file_list
 SENSOR_IN_PAST = Airflow_var.sensor_in_past
-ADJUST_YEAR = Airflow_var.adjust_year
 DAYS_IN_YEAR = Airflow_var.days_in_year
 # Connections to the used servers, configurations can be found in the airflow webserver GUI or over the commandline
 FTP_CONN_ID = Airflow_var.ftp_conn_id
@@ -88,9 +89,6 @@ SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
 # Slack connection ID
 SLACK_CONN_ID = Airflow_var.slack_conn_id
 # Time properties
-YEAR = Airflow_var.year
-MONTH = Airflow_var.month
-DAY = Airflow_var.day
 START = Airflow_var.start
 END_DAY = Airflow_var.end
 """
@@ -181,18 +179,15 @@ def extract_regular_dates():
                                   execution_date=datetime.now(timezone.utc),
                                   dag_ids=DAG_ID,
                                   include_prior_dates=True)
-
-        dates = []
+        dates = set()
         for date in updates:
-
             try:
-                val = json.loads(date.value)
-                dates.append(val)
+                val = json.loads(str(date.value))
+                dates.update({val})
             except TypeError as e:
                 logging.info('Unfortunately got %s, will continue as planed' % str(e))
                 continue
 
-        dates = set(dates)
         regular_dates.append(dates)
 
     return regular_dates
@@ -236,7 +231,6 @@ def download_regular_files_from_ftp_server(remote_path, local_path, file_list, s
     regular_dates = extract_regular_dates()
 
     for file, r_dates in zip(file_list, regular_dates):
-
         for date_value in r_dates:
 
             remote_path_full = remote_path + file + '_' + str(date_value) + suffix
@@ -263,7 +257,6 @@ def download_irregular_files_from_ftp_server(remote_path, local_path, file_list,
     irregular_dates = extract_irregular_dates()
 
     for file, update in zip(file_list, irregular_dates):
-
         if not update:
             continue
 
@@ -285,7 +278,6 @@ def check_hash_of_new_files(regular_dates, irregular_dates):
     """
     dates_to_update = set()
     for r_file, r_dates in zip(REGULAR_FILE_LIST, regular_dates):
-
         for present_date in r_dates:
 
             r_temp_full_path = LOCAL_PATH + 'temp/' + r_file + '_' + str(present_date) + SUFFIX
@@ -316,7 +308,6 @@ def check_hash_of_new_files(regular_dates, irregular_dates):
                 copyfile(r_temp_full_path, r_local_full_path)
 
     for ir_file, ir_update in zip(IRREGULAR_FILE_LIST, irregular_dates):
-
         if not ir_update:
             continue
 
@@ -356,8 +347,12 @@ def update_facts_tables():
     :return: None
     """
     pusher = xcom.XCom
-
     END = datetime.strptime(END_DAY, '%Y%m%d')
+
+    regular_dates = extract_regular_dates()
+    irregular_dates = extract_irregular_dates()
+
+    dates = check_hash_of_new_files(regular_dates, irregular_dates)
 
     for i in range(DAYS_IN_YEAR):
         date_old = (END - timedelta(days=i)).strftime('%Y%m%d')
@@ -368,16 +363,11 @@ def update_facts_tables():
                        task_id='date_update', dag_id='dag_3plus')
             break
 
-    regular_dates = extract_regular_dates()
-    irregular_dates = extract_irregular_dates()
-
-    dates = check_hash_of_new_files(regular_dates, irregular_dates)
-
     logging.info('Starting with updating live facts-table')
-    pin_functions.update_live_facts_table(dates)
+    Pin_Functions.update_live_facts_table(dates)
 
     logging.info('Continuing with updating time-shifted facts-table')
-    pin_functions.update_tsv_facts_table(dates)
+    Pin_Functions.update_tsv_facts_table(dates)
 
     for s in range(DAYS_IN_YEAR):
         date_lv_old = (END - timedelta(days=s)).strftime('%Y%m%d')
@@ -517,7 +507,7 @@ Task_Update_Facts_Table = PythonOperator(
 # The deletion of the Xcom has to be done on the default DB for configuration or changing the db
 # Also, the existing DB and connections should be viewable in the Airflow-GUI.
 Task_Delete_Xcom_Variables = SqliteOperator(
-    task_id='Delete_xcom',
+    task_id='Delete_xcom_date_push',
     sql="delete from xcom where task_id='date_push'",
     sqlite_conn_id=SQL_ALCHEMY_CONN,
     trigger_rule='all_done',

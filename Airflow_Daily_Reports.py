@@ -1,5 +1,7 @@
-from Airflow_Utils import Airflow_variables, Sensors_3plus, pin_functions
-from Daily_Reports import Transformations_Functions
+import Sensors_3plus
+import Pin_Functions
+import Airflow_Variables
+import Transformations_Daily_Report
 import json
 import logging
 import os
@@ -12,19 +14,13 @@ from airflow.contrib.operators.slack_webhook_operator import SlackWebhookOperato
 from datetime import datetime, timedelta, timezone
 
 DAG_ID = 'dag_daily_reports'
-Airflow_var = Airflow_variables.AirflowVariables()
+Airflow_var = Airflow_Variables.AirflowVariables()
 # Global variables used in this file
 SLACK_CONN_ID = Airflow_var.slack_conn_id
 LOCAL_PATH = Airflow_var.local_path
-TABLES_PATH = Airflow_var.table_viewers_path
-ADJUST_YEAR = Airflow_var.adjust_year
 DAYS_IN_YEAR = Airflow_var.days_in_year
 CHANNELS = Airflow_var.relevant_channels
 SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
-CHANNELS_OF_INTEREST = Airflow_var.channels_of_interest
-YEAR = Airflow_var.year
-MONTH = Airflow_var.month
-DAY = Airflow_var.day
 START = Airflow_var.start
 END_DAY = Airflow_var.end
 """
@@ -101,17 +97,14 @@ def compute_viewers_of_show():
     updates = puller.get_many(key='update', execution_date=datetime.now(timezone.utc), dag_ids='dag_3plus',
                               include_prior_dates=True)
 
-    dates = []
+    dates = set()
     for date in updates:
-
         try:
             val = json.loads(date.value)
-            dates.append(val)
+            dates.update({val})
         except TypeError as e:
             logging.info('Unfortunately got %s, will continue as planed' % str(e))
             continue
-
-    dates = set(dates)
 
     if not dates:
         logging.info('No dates have to be updated, exiting')
@@ -120,7 +113,7 @@ def compute_viewers_of_show():
     logging.info('Following dates will be updated %s' % dates)
     for channel in CHANNELS:
 
-        Transformations_Functions.compute_viewers_for_channel(channel, dates)
+        Transformations_Daily_Report.compute_viewers_of_channel(channel, dates)
         logging.info('Finished updating %s' % channel)
 
 
@@ -130,7 +123,7 @@ def create_vorwoche_zuschauer():
     One xcom variable should be pushed onto the db to get all days which are new
     :return: None
     """
-    df = pin_functions.get_live_facts_table()[0]
+    df = Pin_Functions.get_live_facts_table()[0]
 
     recent_day = START
     END = datetime.strptime(END_DAY, '%Y%m%d')
@@ -147,13 +140,13 @@ def create_vorwoche_zuschauer():
 
     date = datetime.strptime(update, '%Y%m%d')
     recent_day = datetime.strptime(recent_day, '%Y%m%d')
-    dates = []
+    dates = set()
     while True:
         date += timedelta(days=1)
         if recent_day < date:
             break
         else:
-            dates.append(date.strftime('%Y%m%d'))
+            dates.update({date.strftime('%Y%m%d')})
 
     if not dates:
         logging.info('No dates have to be updated, exiting')
@@ -161,8 +154,7 @@ def create_vorwoche_zuschauer():
 
     logging.info('Following dates will be updated %s' % dates)
     for date in dates:
-
-        Transformations_Functions.compute_zuschauer_vorwoche(df, date)
+        Transformations_Daily_Report.compute_zuschauer_vorwoche(df, date)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
