@@ -358,7 +358,9 @@ def update_facts_tables():
         date_old = (END - timedelta(days=i)).strftime('%Y%m%d')
         if date_old == START:
             break
-        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_old)):
+        if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_old)) and not pusher.get_one(
+                key='newest_day', execution_date=datetime.now(timezone.utc),
+                dag_id='dag_3plus', include_prior_dates=True):
             pusher.set(key='newest_day', value=str(date_old), execution_date=datetime.now(timezone.utc),
                        task_id='date_update', dag_id='dag_3plus')
             break
@@ -405,6 +407,10 @@ def delete_content_temp_dir(**kwargs):
                 os.unlink(file_path)
         except Exception as e:
             logging.info(e)
+
+
+def verify_facts_table():
+    Pin_Functions.see_if_correct()
 
 
 # ----------------------------------------------------------------------------------------------------------------------

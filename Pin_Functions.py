@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 import os
 import Airflow_Variables
+import numpy as np
 
 from datetime import timedelta, datetime
 from collections import Counter
@@ -17,7 +18,9 @@ operations are direct consequence of infosys data architecture, as an example th
 Airflow_var = Airflow_Variables.AirflowVariables()
 # Some global variables
 LOCAL_PATH = Airflow_var.local_path
+SOL_PATH = Airflow_var.verify_path
 VORWOCHE_PATH = Airflow_var.vorwoche_path
+DROPBOX_PATH = Airflow_var.dropbox_path
 DAYS_IN_YEAR = Airflow_var.days_in_year
 TSV_DAYS = Airflow_var.days_tsv
 ADJUST_YEAR = Airflow_var.adjust_year
@@ -196,6 +199,29 @@ def get_age_dict(date):
     return age_dict
 
 
+def get_age_dict_ovn(date):
+    """
+    Get the age dictionary for ovn viewing. Only implemeted because someone could have birthday between
+    airing date and watching date.
+    :param date: Day of interest
+    :return: dict of the age with key (H_P, date)
+    """
+    age_dict = {}
+    date = datetime.strptime(date, '%Y%m%d')
+
+    for i in range(TSV_DAYS):
+        with open(f'{LOCAL_PATH}SocDem/SocDem_{(date - timedelta(days=i)).strftime("%Y%m%d")}.pin',
+                  'r', encoding='latin-1') as f:
+            df_socdem = pd.read_csv(f, dtype='int32', usecols=['FileDate', 'SampleId', 'Person', 'SocDemVal1'])
+
+        df_socdem['H_P'] = df_socdem['SampleId'].astype(str) + "_" + df_socdem['Person'].astype(str)
+        temp_dict = {(a, str(c)): b for a, c, b in zip(df_socdem['H_P'].values.tolist(),
+                                                       df_socdem['FileDate'].values.tolist(),
+                                                       df_socdem['SocDemVal1'].values.tolist())}
+        age_dict.update(temp_dict)
+    return age_dict
+
+
 def get_brc(date):
     """
     Aggregates the broadcast file of 'date' with right dtypes
@@ -323,7 +349,7 @@ def get_tsv_viewers(date, agemin, agemax):
     df['H_P'] = df['HouseholdId'].astype(str) + "_" + df['IndividualId'].astype(str)
 
     # Filtering out based on ages
-    df['age'] = df['H_P'].map(get_age_dict(date))
+    df['age'] = df[['H_P', 'RecordingDate']].T.apply(tuple).map(get_age_dict_ovn(date))
     df = df[(df['age'] >= agemin) & (df['age'] <= agemax)]
 
     # Filtering on language
@@ -423,17 +449,17 @@ def update_tsv_facts_table(dates):
     :param dates: Series of int dates which have to be updated on the table
     :return: None
     """
-    df_old, i = get_tsv_facts_table()
+    df_old = get_tsv_facts_table()[0]
 
     # Remove updated entries from the old file
     if not df_old.empty and ADJUST_YEAR >= 0:
         # Check if older entries exist of files which are present, otherwise update them
         for k in range(DAYS_IN_YEAR):
-            date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
+            date = (datetime.now() - timedelta(days=k)).strftime('%Y%m%d')
             if date == START:
                 break
             if date not in df_old['date'].values:
-                dates.update([str(date)])
+                dates.append(str(date))
         for date_remove in dates:
             df_old = df_old[df_old['date'] != str(date_remove)]
 
@@ -795,30 +821,27 @@ def add_individual_ratings_ovn(df):
     return df
 
 
-def compute_live_rt(path, station, path_comp_sol):
+def compute_live_rt(path, path_comp_sol):
     """
     Computes and saves ratings for the live facts table
     :param path: Path to the live facts table
-    :param station: Station on which the ratings should be computed for
     :param path_comp_sol: Path where to save the resulting file
     :return: None
     """
     date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
-
     df_2019_live = pd.read_csv(path, parse_dates=date_cols)
 
+    df_2019_live = df_2019_live[df_2019_live['station'].isin(CHANNELS)]
     df_2019_live = add_individual_ratings(df_2019_live)
-    df_2019_live = df_2019_live[df_2019_live['station'] == station]
-    df_2019_live = df_2019_live.groupby(['broadcast_id', 'date'])[['individual_Rt-T_live', 'duration']].sum()
+    df_2019_live = df_2019_live.groupby(['broadcast_id', 'date'])['individual_Rt-T_live'].sum()
 
     df_2019_live.to_csv(path_comp_sol)
 
 
-def compute_tsv_rt(path, station, path_comp_sol):
+def compute_tsv_rt(path, path_comp_sol):
     """
     Computes the rating for the time-shifted facts table
     :param path: Path to the time-shifted facts table
-    :param station: Channel of which the ratings should be computed for
     :param path_comp_sol: Path where to save the resulting file
     :return: None
     """
@@ -827,8 +850,8 @@ def compute_tsv_rt(path, station, path_comp_sol):
 
     df_2019_tsv = pd.read_csv(path, parse_dates=delayed_date_cols)
 
+    df_2019_tsv = df_2019_tsv[df_2019_tsv['station'].isin(CHANNELS)]
     df_2019_tsv = add_individual_ratings_ovn(df_2019_tsv)
-    df_2019_tsv = df_2019_tsv[df_2019_tsv['station'] == station]
     df_2019_tsv = df_2019_tsv.groupby(['broadcast_id'])['individual_Rt-T_tsv'].sum().to_frame()
     df_2019_tsv = df_2019_tsv.reset_index(level=0)
 
@@ -845,20 +868,22 @@ def verify_live_table(path_comp_sol, path_infosys_sol, comparison_path):
     """
     comp_sol = pd.read_csv(path_comp_sol)
     infosys_sol = pd.read_excel(path_infosys_sol, names=[1, 2, 3, 4, 'date', 6, 7, 8, 9, 'broadcast_id',
-                                                         'individual_Rt-T_live', 'individual_Rt-T_tsv',
-                                                         13, 14, 15, 16, 17, 18])
+                                                         'individual_Rt-T_live', 'individual_Rt-T_sum',
+                                                         'individual_Rt-T_tsv'])
     infosys_sol = infosys_sol.iloc[3:]
 
     infosys_sol['date'] = infosys_sol['date'].str.replace('.', '', regex=False)
     infosys_sol['date'] = pd.to_datetime(infosys_sol['date'], format='%d%m%Y')
     infosys_sol['date'] = infosys_sol['date'].dt.strftime('%Y%m%d').astype(int)
 
-    sol = pd.merge(infosys_sol, comp_sol, on=['broadcast_id'], how='inner', suffixes=["_x", "_y"])
+    sol = pd.merge(infosys_sol, comp_sol, on=['broadcast_id', 'date'], how='inner', suffixes=["_x", "_y"])
 
     sol['difference_live'] = sol['individual_Rt-T_live_x'] - sol['individual_Rt-T_live_y']
-    sol = sol.drop(columns=[1, 2, 3, 4, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18])
+    sol = sol.drop(columns=[1, 2, 3, 4, 6, 7, 8, 9])
 
     sol.to_csv(comparison_path)
+
+    return sol['difference_live'].sum()
 
 
 def verify_tsv_table(path_comp_sol, path_infosys_sol, comparison_path):
@@ -871,8 +896,8 @@ def verify_tsv_table(path_comp_sol, path_infosys_sol, comparison_path):
     """
     comp_sol = pd.read_csv(path_comp_sol)
     infosys_sol = pd.read_excel(path_infosys_sol, names=[1, 2, 3, 4, 'date', 6, 7, 8, 9, 'broadcast_id',
-                                                         'individual_Rt-T_live', 'individual_Rt-T_tsv',
-                                                         13, 14, 15, 16, 17, 18])
+                                                         'individual_Rt-T_live', 'individual_Rt-T_sum',
+                                                         'individual_Rt-T_tsv'])
     infosys_sol = infosys_sol.iloc[3:]
 
     infosys_sol['date'] = infosys_sol['date'].str.replace('.', '', regex=False)
@@ -881,31 +906,51 @@ def verify_tsv_table(path_comp_sol, path_infosys_sol, comparison_path):
 
     f = {'individual_Rt-T_live': 'sum', 'individual_Rt-T_tsv': 'sum'}
     infosys_sol = infosys_sol.groupby(['broadcast_id'])[['individual_Rt-T_live', 'individual_Rt-T_tsv']].agg(f)
-    infosys_sol = infosys_sol.reset_index(level=0)
+    infosys_sol = infosys_sol.reset_index(level=0, drop=False)
 
     sol = pd.merge(infosys_sol, comp_sol, on=['broadcast_id'], how='inner', suffixes=["_x", "_y"])
+    sol = sol.drop(columns=['Unnamed: 0'])
 
-    sol['difference_tsv'] = sol['individual_Rt-T_tsv_x'] - sol['individual_Rt-T_tsv_y'] - sol['individual_Rt-T_live']
+    sol['difference_tsv'] = sol['individual_Rt-T_tsv_x'] - sol['individual_Rt-T_tsv_y']
 
     sol.to_csv(comparison_path)
 
+    return sol['difference_tsv'].sum()
 
-def see_if_correct():
+
+def check_ratings_shows():
     """
     Check if our computed facts table has the same values as the infosys facts table
     :return: None
     """
-    compute_live_rt(path='/home/floosli/Documents/PIN_Data/20190101_20191030_Live_DE_15_49_mG.csv',
-                    station='3+', path_comp_sol='/home/floosli/Documents/PIN_Data/solutions/live_rt_T_table')
-    verify_live_table(path_comp_sol='/home/floosli/Documents/PIN_Data/solutions/live_rt_T_table',
-                      path_infosys_sol='/home/floosli/Documents/PIN_Data/solutions/test_tab.xlsx',
-                      comparison_path='/home/floosli/Documents/PIN_Data/solutions/diff_sol_lv')
+    compute_live_rt(path=DROPBOX_PATH + 'updated_live_facts_table.csv',
+                    path_comp_sol=SOL_PATH + 'live_rt_T_table.csv')
+    result_live = verify_live_table(path_comp_sol=SOL_PATH + 'live_rt_T_table.csv',
+                                    path_infosys_sol=SOL_PATH + 'test_tab.xlsx',
+                                    comparison_path=SOL_PATH + 'diff_sol_lv.csv')
 
-    compute_tsv_rt(path='/home/floosli/Documents/PIN_Data/20190101_20191030_delayedviewing_DE_15_49_mG.csv',
-                   station='3+', path_comp_sol='/home/floosli/Documents/PIN_Data/solutions/tsv_rt_T_table')
-    verify_tsv_table(path_comp_sol='/home/floosli/Documents/PIN_Data/solutions/tsv_rt_T_table',
-                     path_infosys_sol='/home/floosli/Documents/PIN_Data/solutions/test_tab.xlsx',
-                     comparison_path='/home/floosli/Documents/PIN_Data/solutions/diff_sol_tsv')
+    compute_tsv_rt(path=DROPBOX_PATH + 'updated_tsv_facts_table.csv',
+                   path_comp_sol=SOL_PATH + 'tsv_rt_T_table.csv')
+    result_tsv = verify_tsv_table(path_comp_sol=SOL_PATH + 'tsv_rt_T_table.csv',
+                                  path_infosys_sol=SOL_PATH + 'test_tab.xlsx',
+                                  comparison_path=SOL_PATH + 'diff_sol_tsv.csv')
+
+    return result_live, result_tsv
+
+
+def compute_rating_per_channel(path):
+
+    date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
+    df_2019_live = pd.read_csv(path, parse_dates=date_cols)
+
+    df_2019_live = add_individual_ratings(df_2019_live)
+
+    df_2019_live = df_2019_live.groupby(by=['date', 'station'])['individual_Rt-T_live'].sum()
+
+    channel_with_zeros = df_2019_live[df_2019_live.values == 0]
+
+    return all(df_2019_live) > 0, channel_with_zeros
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+

@@ -74,7 +74,7 @@ default_args = {
 # DAG Definition and various setting influencing the workflow of the DAG
 dag_daily_reports = DAG(dag_id=DAG_ID,
                         description='DAG to update the viewers table for shows',
-                        schedule_interval='0 9,21 * * 1-5',
+                        schedule_interval='0 10,22 * * 1-5',
                         start_date=datetime(year=2019, month=10, day=15, hour=14),
                         end_date=None,
                         default_args=default_args,

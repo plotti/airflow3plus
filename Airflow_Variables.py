@@ -39,6 +39,9 @@ class AirflowVariables:
         self.vorwoche_path = '/home/floosli/Documents/Excel_VorwocheZuschauer/'
         self.steal_pot_path = '/home/floosli/Documents/Heavy_Viewers_StealPot/'
         self.heatmap_path = '/home/floosli/Documents/Heatmap/'
+        self.verify_path = '/home/floosli/Documents/PIN_Data/solutions/'
+        self.dropbox_path = '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/' \
+                            'Projects/data/Processed_pin_data/'
         self.suffix = '.pin'
         self.regular_file_list = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
         self.irregular_file_list = ['Station', 'CritCode', 'Crit']

@@ -3,7 +3,8 @@ import shutil
 import logging
 import os
 import calendar
-from Airflow_Utils import Airflow_variables, pin_functions
+import Pin_Functions
+import Airflow_Variables
 
 from airflow.models import DAG
 from airflow.operators.python_operator import PythonOperator
@@ -23,7 +24,7 @@ facts tables.
 This DAG can only be triggered manually.
 """
 DAG_ID = 'dag_reset'
-Airflow_var = Airflow_variables.AirflowVariables()
+Airflow_var = Airflow_Variables.AirflowVariables()
 # Global variables used in this file
 SLACK_CONN_ID = Airflow_var.slack_conn_id
 LOCAL_PATH = Airflow_var.local_path
@@ -183,18 +184,18 @@ def create_live_facts_table():
     logging.info('Will update from date %s' % date)
     while True:
         logging.info('Updating still ongoing from date %s' % date)
-        dates = set()
 
+        dates = set()
         for i in range(7):
             add = date.strftime('%Y%m%d')
             if add == end:
                 cond = True
-                dates.update([int(add)])
+                dates.update({str(add)})
                 break
-            dates.update([int(add)])
+            dates.update({str(add)})
             date = date + timedelta(days=1)
 
-        pin_functions.update_live_facts_table(dates)
+        Pin_Functions.update_live_facts_table(dates)
 
         if cond:
             logging.info("Reached the end date successfully, finished live table")
@@ -244,7 +245,7 @@ def create_tsv_facts_table():
             dates.update([int(add)])
             date = date + timedelta(days=1)
 
-        pin_functions.update_tsv_facts_table(dates)
+        Pin_Functions.update_tsv_facts_table(dates)
 
         if cond:
             logging.info("Reached the end date successfully, finished tsv table")

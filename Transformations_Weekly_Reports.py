@@ -21,7 +21,7 @@ DAY = Airflow_var.day
 ADJUST_YEAR = Airflow_var.adjust_year
 STEAL_POT_PATH = Airflow_var.steal_pot_path
 HEATMAP_PATH = Airflow_var.heatmap_path
-CHANNELS = Airflow_var.relevant_channels
+CHANNELS = Airflow_var.relevant_channels + ['3+: First Runs']
 CHANNELS_OF_INTEREST = Airflow_var.channels_of_interest + ['n-tv CH', 'Andere']
 threeplus = Airflow_var.shows_3plus
 fourplus = Airflow_var.shows_4plus
@@ -30,6 +30,15 @@ sixplus = Airflow_var.shows_6plus
 tvtwentyfour = Airflow_var.shows_TV24
 tvtwentyfive = Airflow_var.shows_TV25
 sone = Airflow_var.shows_S1
+
+list_EPs = [['Der Bachelor', '3+: First Runs'], ['Die Bachelorette', '3+: First Runs'],
+            ['Adieu Heimat - Schweizer wandern aus', '3+: First Runs'],
+            ['Bumann, der Restauranttester', '3+: First Runs'], ['Bauer, ledig, sucht ...', '3+: First Runs']]
+
+name_EPs = ['Der Bachelor', 'Die Bachelorette', 'Adieu Heimat - Schweizer wandern aus',
+            'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester']
+
+dates_EPs = pd.read_pickle('/home/floosli/Documents/epdates_.pkl')
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -50,14 +59,27 @@ def filter_for_channel(df, channel, start_hour=20, end_hour=23, date=None, min_d
                       & (df['show_starttime'].dt.hour >= start_hour)
                       & (df['show_endtime'].dt.hour <= end_hour)
                    & (df['duration'] > min_duration)]
-                   .groupby(['Description', 'H_P', 'Title'])['duration_weighted'].sum()).to_frame().reset_index()
+                   .groupby(['Description', 'H_P', 'Title', 'date'])['duration_weighted'].sum()).\
+        to_frame().reset_index()
     if date is not None:
-        df_filtered = df_filtered[df_filtered['Date'].isin(date)]
+        df_filtered = df_filtered[df_filtered['date'].isin(date)]
     return df_filtered
 
 
-def filter_for_show(df, title):
-    df_show = df[df['Title'] == title]
+def filter_for_show(df, title, first_run=False):
+
+    if title in name_EPs and first_run:
+        dates = dates_EPs.get(title)
+        trans_date = list()
+        for date in dates:
+            ts = pd.to_datetime(str(date))
+            date = ts.strftime('%Y%d%m')
+            trans_date.append(date)
+        df = df[df['date'].isin(trans_date)]
+        df_show = df[df['Title'] == title]
+    else:
+        df_show = df[df['Title'] == title]
+
     return df_show
 
 
@@ -148,6 +170,7 @@ def analyse_heavy_viewers():
     list_list_shows = []
 
     list_list_shows.extend(threeplus)
+    list_list_shows.extend(list_EPs)
     list_list_shows.extend(fourplus)
     list_list_shows.extend(fiveplus)
     list_list_shows.extend(sixplus)
@@ -157,7 +180,17 @@ def analyse_heavy_viewers():
 
     channel_df_dict = {}
     for channel in CHANNELS:
-        df_temp = filter_for_channel(df, channel)
+        if channel == '3+: First Runs':
+            trans_date = list()
+            for title in name_EPs:
+                dates = dates_EPs.get(title)
+                for date in dates:
+                    ts = pd.to_datetime(str(date))
+                    date = ts.strftime('%Y%d%m')
+                    trans_date.append(date)
+            df_temp = filter_for_channel(df, '3+', date=trans_date)
+        else:
+            df_temp = filter_for_channel(df, channel)
         channel_df_dict.update({channel: df_temp})
 
     combinations = itertools.combinations_with_replacement(list_list_shows, 2)
@@ -171,8 +204,16 @@ def analyse_heavy_viewers():
         df_chan_1 = channel_df_dict.get(show_1[1])
         df_chan_2 = channel_df_dict.get(show_2[1])
 
-        df_show_1 = filter_for_show(df_chan_1, show_1[0])
-        df_show_2 = filter_for_show(df_chan_2, show_2[0])
+        if show_1[1] == '3+: First Runs':
+            df_show_1 = filter_for_show(df_chan_1, show_1[0], first_run=True)
+        else:
+            df_show_1 = filter_for_show(df_chan_1, show_1[0], first_run=False)
+
+        if show_2[1] == '3+: First Runs':
+            df_show_2 = filter_for_show(df_chan_2, show_2[0], first_run=True)
+        else:
+            df_show_2 = filter_for_show(df_chan_2, show_2[0], first_run=False)
+
         if df_show_2.empty or df_show_1.empty:
             continue
 
@@ -194,13 +235,14 @@ def analyse_heavy_viewers():
                                    'steal_pot1': scalar_show_1/res_show_1, 'steal_pot2': scalar_show_2/res_show_2},
                              index=[0])
 
-        df_shows = pd.concat([df_shows, entry], axis=0, ignore_index=True, sort=True)
+        df_shows = pd.concat([df_shows, entry], axis=0, ignore_index=True, sort=False)
 
-    df_shows = df_shows.reindex(sorted(df_shows.columns), axis=1)
+    df_shows = df_shows.reindex(df_shows.columns, axis=1)
 
     df_reg = pd.pivot_table(data=df_shows, index=['chan1', 'show1'], columns='name2', values='steal_pot1')
     df_reg = df_reg.fillna(0)
     np.fill_diagonal(df_reg.values, 1)
+
     df_trans = pd.pivot_table(data=df_shows, index=['chan2', 'show2'], columns='name1', values='steal_pot2')
     df_trans = df_trans.fillna(0)
     np.fill_diagonal(df_trans.values, 0)
@@ -209,8 +251,8 @@ def analyse_heavy_viewers():
     results.index.names = ['channel', 'show']
     results = results.reset_index(drop=False)
     results = results.round(decimals=2)
-    writer = pd.ExcelWriter(STEAL_POT_PATH + 'table_heavy_viewers_stealing.xlsx',
-                            engine='xlsxwriter')
+
+    writer = pd.ExcelWriter(STEAL_POT_PATH + 'table_heavy_viewers_stealing.xlsx', engine='xlsxwriter')
     results.to_excel(writer, sheet_name='report_hv')
 
     worksheet = writer.sheets['report_hv']

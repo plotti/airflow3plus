@@ -1,7 +1,10 @@
 import os
 import re
+import json
 import ftplib
 import logging
+import Pin_Functions
+import pandas as pd
 
 from datetime import datetime, timedelta, timezone
 
@@ -275,3 +278,113 @@ class SensorMostRecentUpdate(BaseSensorOperator):
 
         logging.info('The facts table has not been updated in the last for years, should have a look at the server')
         return False
+
+
+class SensorVerifyFactsTables(BaseSensorOperator):
+    """
+    Sensor to check if our facts table is able to reproduce the values from infosys and other
+    heuristics to check the validity of our downloaded files.
+    """
+    @apply_defaults
+    def __init__(
+            self,
+            fail_on_transient_errors=True,
+            *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fail_on_transient_errors = fail_on_transient_errors
+
+    def poke(self, context):
+
+        var = AirflowVariables()
+        local_path = var.local_path
+        dropbox_path = var.dropbox_path
+
+        puller = xcom.XCom
+        updates = puller.get_many(key='update', execution_date=datetime.now(timezone.utc), dag_ids='dag_3plus',
+                                  include_prior_dates=True)
+
+        dates = set()
+        for date in updates:
+            try:
+                val = json.loads(date.value)
+                dates.update({val})
+            except TypeError as e:
+                logging.info('Unfortunately got %s, will continue as planed' % str(e))
+                continue
+
+        if not dates:
+            logging.info('No dates have to be updated, exiting')
+            return True
+
+        # Parameter to check if a condition fails
+        condition = True
+
+        # Check if all channels have a rating above 0 which should be the case
+        # and otherwise an indicator that something is wrong
+        zero_threshold, channels = Pin_Functions.compute_rating_per_channel(dropbox_path +
+                                                                            'updated_live_facts_table.csv')
+        if not zero_threshold:
+            logging.info('Some Channels have a rating of 0, more precisely: %s' % channels)
+        else:
+            logging.info('All channels have a rating above 0, nothing suspicious')
+
+        # Check the facts table rating values
+        results = Pin_Functions.check_ratings_shows()
+        if abs(results[0]) > 0.1:
+            logging.info('The live facts table has a difference of %.2f' % results[0])
+            condition = False
+        else:
+            logging.info('The computed rating of our facts table are in the range of correctness')
+            logging.info('Live Difference: %.2f, TSV Difference: %.2f' % (results[0], results[1]))
+
+        try:
+            with open(f'{local_path}Crit.pin', 'r', encoding='latin-1') as f:
+                df_crit = pd.read_csv(f)
+        except FileNotFoundError as e:
+            logging.info('Crit file is missing got %s' % str(e))
+
+        for date in dates:
+
+            try:
+                with open(f'{local_path}Weight/Weight_{date}.pin', 'r', encoding='latin-1') as f:
+                    df_wei = pd.read_csv(f)
+
+                with open(f'{local_path}SocDem/SocDem_{date}.pin', 'r', encoding='latin-1') as f:
+                    df_socdem = pd.read_csv(f, dtype='int32', usecols=['SampleId', 'Person', 'SocDemVal1'])
+
+                with open(f'{local_path}BrdCst/BrdCst_{date}.pin', 'r', encoding='latin-1') as f:
+                    df_brc = pd.read_csv(f, dtype={'Date': 'object', 'StartTime': 'object', 'ChannelCode': 'int'})
+            except FileNotFoundError as e:
+                logging.info('Got %s even though it should exist' % str(e))
+                condition = False
+
+            # Check Socdem and Weights, # Ids has to be the same:
+            if len(df_wei['SampledIdRep'].unique()) != len(df_socdem['SampleId'].unique()):
+                logging.info('The amount of IDs to no match in Weights and SocDem')
+                condition = False
+            else:
+                logging.info('The number of IDs match in Weights and SocDem')
+
+            # Check SocDem values, if for each aspect a description exist
+            if len(df_socdem.columns - 3) != len(df_crit.index):
+                logging.info('There is not a value for every SocDem value in the Crit file')
+                condition = False
+            else:
+                logging.info('There are enough SocDem values in Crit')
+
+            # Check if amount of unique channels in the BrdCst file is nothing unusual
+            if len(df_brc['ChannelCode'].unique()) < 50 or len(df_brc['ChannelCode'].unique()) > 75:
+                logging.info('Unusual amount of channels detected in the BrdCst file')
+                condition = False
+            else:
+                logging.info('Nothing suspect in the amount of channels in BrdCst file')
+
+        # Check if there are the same amount of files of each kind
+        if (len(next(os.walk(local_path + 'SocDem/'))[2]) != len(next(os.walk(local_path + 'Weight/'))[2])) or\
+                (len(next(os.walk(local_path + 'BrdCst/'))[2]) != len(next(os.walk(local_path + 'UsageLive/'))[2])):
+            logging.info('There is not the same amount of each type of file present')
+            condition = False
+        else:
+            logging.info('The number of files present is correct')
+
+        return condition

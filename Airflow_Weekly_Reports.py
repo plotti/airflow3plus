@@ -178,7 +178,7 @@ def create_heavy_viewer_report():
     logging.info('Created the excel file of all the values')
 
     Plotly_Graph_Heavy_Viewers.generate_plotly_table()
-    logging.info('Created the plotly table and saved it locally as html file')
+    logging.info('Created the plotly table and saved it locally as .html file')
 
 
 def send_mail_plotly_graph():
