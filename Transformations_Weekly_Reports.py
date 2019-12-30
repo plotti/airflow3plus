@@ -21,6 +21,7 @@ DAY = Airflow_var.day
 ADJUST_YEAR = Airflow_var.adjust_year
 STEAL_POT_PATH = Airflow_var.steal_pot_path
 HEATMAP_PATH = Airflow_var.heatmap_path
+DROPBOX_PATH = Airflow_var.flask_path
 CHANNELS = Airflow_var.relevant_channels + ['3+: First Runs']
 CHANNELS_OF_INTEREST = Airflow_var.channels_of_interest + ['n-tv CH', 'Andere']
 threeplus = Airflow_var.shows_3plus
@@ -252,7 +253,7 @@ def analyse_heavy_viewers():
     results = results.reset_index(drop=False)
     results = results.round(decimals=2)
 
-    writer = pd.ExcelWriter(STEAL_POT_PATH + 'table_heavy_viewers_stealing.xlsx', engine='xlsxwriter')
+    writer = pd.ExcelWriter(DROPBOX_PATH + 'Heavy_Viewers/' + 'table_heavy_viewers_stealing.xlsx', engine='xlsxwriter')
     results.to_excel(writer, sheet_name='report_hv')
 
     worksheet = writer.sheets['report_hv']
@@ -379,8 +380,9 @@ def update_heatmap(date, threshold_duration=False):
             d_f = pd.DataFrame(0, index=CHANNELS_OF_INTEREST, columns=CHANNELS_OF_INTEREST)
             d_f = instances_of_zapping(d_f, dz, 1)
             daily_zap_dict[d + format_] = d_f
+
     if threshold_duration:
-        with open(HEATMAP_PATH + 'data_heatmap_newPIN.pkl', 'wb') as f:
+        with open(HEATMAP_PATH + 'data_heatmap_new_PIN.pkl', 'wb') as f:
             pickle.dump(daily_zap_dict, f)
 
         with open(HEATMAP_PATH + 'data_heatmap_chmedia_threshold.pkl', 'rb') as f:
@@ -391,8 +393,11 @@ def update_heatmap(date, threshold_duration=False):
         with open(HEATMAP_PATH + 'data_heatmap_chmedia_threshold.pkl', 'wb') as f:
             pickle.dump(data_new_heatmap, f)
 
+        with open(DROPBOX_PATH + 'Heatmap/' + 'data_heatmap_chmedia_threshold.pkl', 'wb') as f:
+            pickle.dump(data_new_heatmap, f)
+
     else:
-        with open(HEATMAP_PATH + 'data_heatmap_newPIN.pkl', 'wb') as f:
+        with open(HEATMAP_PATH + 'data_heatmap_new_PIN.pkl', 'wb') as f:
             pickle.dump(daily_zap_dict, f)
 
         with open(HEATMAP_PATH + 'data_heatmap_chmedia.pkl', 'rb') as f:
@@ -401,6 +406,9 @@ def update_heatmap(date, threshold_duration=False):
         data_new_heatmap = {**data_new_heatmap, **daily_zap_dict}
 
         with open(HEATMAP_PATH + 'data_heatmap_chmedia.pkl', 'wb') as f:
+            pickle.dump(data_new_heatmap, f)
+
+        with open(DROPBOX_PATH + 'Heatmap/' + 'data_heatmap_chmedia.pkl', 'wb') as f:
             pickle.dump(data_new_heatmap, f)
 
 

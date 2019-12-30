@@ -6,7 +6,7 @@ import logging
 import Pin_Functions
 import pandas as pd
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 
 from airflow.models import xcom
 from airflow.operators.sensors import BaseSensorOperator
@@ -350,10 +350,11 @@ class SensorVerifyFactsTables(BaseSensorOperator):
                     df_wei = pd.read_csv(f)
 
                 with open(f'{local_path}SocDem/SocDem_{date}.pin', 'r', encoding='latin-1') as f:
-                    df_socdem = pd.read_csv(f, dtype='int32', usecols=['SampleId', 'Person', 'SocDemVal1'])
+                    df_socdem = pd.read_csv(f, dtype='int32')
 
                 with open(f'{local_path}BrdCst/BrdCst_{date}.pin', 'r', encoding='latin-1') as f:
                     df_brc = pd.read_csv(f, dtype={'Date': 'object', 'StartTime': 'object', 'ChannelCode': 'int'})
+
             except FileNotFoundError as e:
                 logging.info('Got %s even though it should exist' % str(e))
                 condition = False
@@ -366,7 +367,7 @@ class SensorVerifyFactsTables(BaseSensorOperator):
                 logging.info('The number of IDs match in Weights and SocDem')
 
             # Check SocDem values, if for each aspect a description exist
-            if len(df_socdem.columns - 3) != len(df_crit.index):
+            if (len(df_socdem.columns) - 3) != len(df_crit.index):
                 logging.info('There is not a value for every SocDem value in the Crit file')
                 condition = False
             else:
@@ -388,3 +389,46 @@ class SensorVerifyFactsTables(BaseSensorOperator):
             logging.info('The number of files present is correct')
 
         return condition
+
+
+class SensorInfosysExtract(BaseSensorOperator):
+
+    @apply_defaults
+    def __init__(
+            self,
+            ftp_conn_id='ftp_default',
+            fail_on_transient_errors=True,
+            *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ftp_conn_id = ftp_conn_id
+        self.fail_on_transient_errors = fail_on_transient_errors
+
+    # Return connection Hook pointing to the given ftp server
+    def _create_hook(self):
+        return FTPHook(ftp_conn_id=self.ftp_conn_id)
+
+    def poke(self, context):
+
+        # check if file from last friday was uploaded
+        # if yes download and return yes
+        # if no return false
+        with self._create_hook() as hook:
+
+            self.log.info('Checking if last fridays a Infosysextract was uploaded')
+
+            local_path = '/home/floosli/Documents/PIN_Data/temp/infosys_ex.txt'
+
+            today = date.today()
+            last_friday_upload = today - timedelta(days=3+5)
+            date_string = str(last_friday_upload.day) + '.' + str(last_friday_upload.month)\
+                          + '.' + str(last_friday_upload.year)
+            server_path = f'marketshare ({date_string}).txt'
+
+            try:
+                self.log.info(f'A Infosys extract was uploaded, the values will be checked')
+                hook.retrieve_file(remote_full_path=server_path, local_full_path_or_buffer=local_path)
+                return True
+
+            except ftplib.error_perm as e:
+                self.log.info(f'There was no file uploaded last friday {e}')
+                return False

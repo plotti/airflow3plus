@@ -86,6 +86,7 @@ DAYS_IN_YEAR = Airflow_var.days_in_year
 # Connections to the used servers, configurations can be found in the airflow webserver GUI or over the commandline
 FTP_CONN_ID = Airflow_var.ftp_conn_id
 SQL_ALCHEMY_CONN = Airflow_var.sql_alchemy_conn
+INFOSYS_FTP_CONN_ID = Airflow_var.infosys_ftp_conn_id
 # Slack connection ID
 SLACK_CONN_ID = Airflow_var.slack_conn_id
 # Time properties
@@ -340,6 +341,23 @@ def check_hash_of_new_files(regular_dates, irregular_dates):
     return dates_to_update
 
 
+def detect_correct_dates():
+    """
+    Remove dates did not get updated
+    """
+    pusher = xcom.XCom
+    regular_dates = extract_regular_dates()
+    irregular_dates = extract_irregular_dates()
+
+    dates = check_hash_of_new_files(regular_dates, irregular_dates)
+
+    i = 0
+    for date in dates:
+        pusher.set(key=f'{i}_real', value=str(date), execution_date=datetime.now(timezone.utc),
+                   task_id='dates_real', dag_id=DAG_ID)
+        i += 1
+
+
 def update_facts_tables():
     """
     Data transformation and aggregation
@@ -349,10 +367,18 @@ def update_facts_tables():
     pusher = xcom.XCom
     END = datetime.strptime(END_DAY, '%Y%m%d')
 
-    regular_dates = extract_regular_dates()
-    irregular_dates = extract_irregular_dates()
-
-    dates = check_hash_of_new_files(regular_dates, irregular_dates)
+    updates = pusher.get_many(task_ids=['dates_real'],
+                              execution_date=datetime.now(timezone.utc),
+                              dag_ids=DAG_ID,
+                              include_prior_dates=True)
+    dates = set()
+    for date in updates:
+        try:
+            val = json.loads(str(date.value))
+            dates.update({val})
+        except TypeError as e:
+            logging.info('Unfortunately got %s, will continue as planed' % str(e))
+            continue
 
     for i in range(DAYS_IN_YEAR):
         date_old = (END - timedelta(days=i)).strftime('%Y%m%d')
@@ -407,10 +433,6 @@ def delete_content_temp_dir(**kwargs):
                 os.unlink(file_path)
         except Exception as e:
             logging.info(e)
-
-
-def verify_facts_table():
-    Pin_Functions.see_if_correct()
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -495,6 +517,17 @@ Task_Download_Irregular_Files = PythonOperator(
 # 3. Step
 # Compares also hashes to check if the file really has to be updated with the check_hashes function
 # eventually updates the facts table with the remaining dates which have been determined to be new
+Task_Detect_Dates = PythonOperator(
+    task_id='Detect_dates',
+    provide_context=False,
+    python_callable=detect_correct_dates,
+    retries=3,
+    retry_delay=timedelta(seconds=10),
+    execution_timeout=timedelta(hours=1),
+    priority_weight=1,
+    dag=dag_3plus
+)
+
 Task_Update_Facts_Table = PythonOperator(
     task_id='Update_facts_table',
     provide_context=False,
@@ -512,6 +545,31 @@ Task_Update_Facts_Table = PythonOperator(
 # Delete all the xcom variables from the sqlite database
 # The deletion of the Xcom has to be done on the default DB for configuration or changing the db
 # Also, the existing DB and connections should be viewable in the Airflow-GUI.
+SensorInfosysExtract = Sensors_3plus.SensorInfosysExtract(
+    task_id='Sensor_Infosys_Extract',
+    ftp_conn_id=INFOSYS_FTP_CONN_ID,
+    fail_on_transient_errors=True,
+    poke_interval=60,
+    timeout=200,
+    soft_fail=False,
+    mode='reschedule',
+    trigger_rule='all_done',
+    dag=dag_3plus
+)
+
+SensorValidity = Sensors_3plus.SensorVerifyFactsTables(
+    task_id='Sensor_validity_facts_tables',
+    fail_on_transient_errors=True,
+    poke_interval=60,
+    timeout=600,
+    soft_fail=False,
+    mode='reschedule',
+    on_failure_callback=fail_slack_alert,
+    trigger_rule='all_done',
+    do_xcom_push=True,
+    dag=dag_3plus
+)
+
 Task_Delete_Xcom_Variables = SqliteOperator(
     task_id='Delete_xcom_date_push',
     sql="delete from xcom where task_id='date_push'",
@@ -538,9 +596,10 @@ Task_Delete_Content_temp_dir = PythonOperator(
 # Scheduling is not allowed to contain any circles or repetitions of the same task
 # A graphical view of the DAG is given in the GUI
 # Schedule of Tasks:
-Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Update_Facts_Table
-Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Update_Facts_Table
-Task_Update_Facts_Table >> Task_Delete_Xcom_Variables >> Task_Delete_Content_temp_dir
+Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Detect_Dates >> Task_Update_Facts_Table
+Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Detect_Dates >> Task_Update_Facts_Table
+Task_Update_Facts_Table >> SensorInfosysExtract >> SensorValidity
+SensorValidity >> Task_Delete_Xcom_Variables >> Task_Delete_Content_temp_dir
 
 
 # ----------------------------------------------------------------------------------------------------------------------

@@ -27,7 +27,6 @@ end: End date for our analysis, usually last day of the year
 shows_lists: Lists of the most popular channels on each channel of our main group, movies and 
 one time events are excluded
 """
-# TODO put them on airflow variables
 
 
 class AirflowVariables:
@@ -42,7 +41,9 @@ class AirflowVariables:
         self.verify_path = '/home/floosli/Documents/PIN_Data/solutions/'
         self.dropbox_path = '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/' \
                             'Projects/data/Processed_pin_data/'
+        self.flask_path = '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Flask_Application/'
         self.suffix = '.pin'
+
         self.regular_file_list = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
         self.irregular_file_list = ['Station', 'CritCode', 'Crit']
         self.relevant_channels = ['3+', '4+', '5+', '6+', 'TV24', 'TV25', 'S1']
@@ -54,9 +55,12 @@ class AirflowVariables:
         self.days_in_year = 365
         self.days_tsv = 8
         self.adjust_year = 0
+
         self.ftp_conn_id = 'ftp_server_pin_data'
         self.sql_alchemy_conn = 'sql_alchemy_conn'
         self.slack_conn_id = 'slack'
+        self.infosys_ftp_conn_id = 'infosys_conn'
+
         self.year = datetime.now().year + self.adjust_year
         self.month = datetime.now().month
         self.day = datetime.now().day

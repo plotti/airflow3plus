@@ -5,7 +5,7 @@ import Airflow_Variables
 
 var = Airflow_Variables.AirflowVariables()
 
-PATH = var.steal_pot_path
+PATH = var.flask_path
 CHANNELS = var.relevant_channels + ['3+: First Runs']
 threeplus = var.shows_3plus
 fourplus = var.shows_4plus
@@ -95,7 +95,7 @@ def generate_plotly_table():
                                align="left", xanchor='right')]
 
     # Load dataset and list of shows
-    df = pd.read_excel(PATH + 'table_heavy_viewers_stealing.xlsx', header=0)
+    df = pd.read_excel(PATH + 'Heavy_Viewers/' + 'table_heavy_viewers_stealing.xlsx', header=0)
     df = df.drop(columns=['Unnamed: 0']).reset_index(drop=True)
 
     list_list_shows = list()
@@ -232,3 +232,8 @@ def generate_plotly_table():
                       )
 
     plotly.offline.plot(fig, filename=PATH + 'HeavyViewersTool.html', auto_open=False, auto_play=False)
+
+    div = plotly.offline.plot(fig, show_link=False, output_type="div", include_plotlyjs=True)
+
+    with open(PATH + 'Heavy_Viewers/hv_tool_div.txt', 'w') as f:
+        f.write(div)

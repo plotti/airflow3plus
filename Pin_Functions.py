@@ -3,7 +3,6 @@ import pandas as pd
 import logging
 import os
 import Airflow_Variables
-import numpy as np
 
 from datetime import timedelta, datetime
 from collections import Counter
@@ -83,25 +82,30 @@ def get_tsv_facts_table():
     return df, i
 
 
-def get_older_facts_table():
+def get_older_facts_table(year):
+    try:
+        date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
+        df_2018_lv = pd.read_csv(LOCAL_PATH + '%s0101_%s1231_Live_DE_15_49_mG.csv' % (year, year), parse_dates=date_cols,
+                                 dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
+                                        'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
+                                        'station': str})
 
-    date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
-    df_2018_lv = pd.read_csv(LOCAL_PATH + '20180101_20181231_Live_DE_15_49_mG.csv', parse_dates=date_cols,
-                             dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
-                                    'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
-                                    'station': str})
+        delayed_date_cols = ['ViewingStartTime', 'ViewingTime', 'RecordingStartTime', 'show_endtime',
+                             'show_starttime', 'RecordingEndTime']
+        df_2018_tsv = pd.read_csv(LOCAL_PATH + '%s0101_%s1231_delayedviewing_DE_15_49_mG.csv' % (year, year),
+                                  parse_dates=delayed_date_cols,
+                                  dtype={'Description': str, 'H_P': str, 'HouseholdId': int, 'IndividualId': int,
+                                         'Kanton': int, 'Platform': int, 'StationId': int, 'Title': str, 'TvSet': int,
+                                         'Weights': float, 'UsageDate': int, 'ViewingActivity': int, 'age': int,
+                                         'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
+                                         'station': str})
 
-    delayed_date_cols = ['ViewingStartTime', 'ViewingTime', 'RecordingStartTime', 'show_endtime',
-                         'show_starttime', 'RecordingEndTime']
-    df_2018_tsv = pd.read_csv(LOCAL_PATH + '20180101_20181231_delayedviewing_DE_15_49_mG.csv',
-                              parse_dates=delayed_date_cols,
-                              dtype={'Description': str, 'H_P': str, 'HouseholdId': int, 'IndividualId': int,
-                                     'Kanton': int, 'Platform': int, 'StationId': int, 'Title': str, 'TvSet': int,
-                                     'Weights': float, 'UsageDate': int, 'ViewingActivity': int, 'age': int,
-                                     'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
-                                     'station': str})
+        return df_2018_lv, df_2018_tsv
 
-    return df_2018_lv, df_2018_tsv
+    except FileNotFoundError as e:
+        print(f'{year} facts table does not exist or is not located in the correct folder')
+
+    return pd.DataFrame(), pd.DataFrame()
 
 
 def get_kanton_dict(date):
@@ -449,17 +453,18 @@ def update_tsv_facts_table(dates):
     :param dates: Series of int dates which have to be updated on the table
     :return: None
     """
-    df_old = get_tsv_facts_table()[0]
+    df_old, i = get_tsv_facts_table()
 
     # Remove updated entries from the old file
     if not df_old.empty and ADJUST_YEAR >= 0:
         # Check if older entries exist of files which are present, otherwise update them
         for k in range(DAYS_IN_YEAR):
-            date = (datetime.now() - timedelta(days=k)).strftime('%Y%m%d')
+            date = (datetime.now() - timedelta(days=i + k)).strftime('%Y%m%d')
             if date == START:
                 break
             if date not in df_old['date'].values:
-                dates.append(str(date))
+                dates.update([str(date)])
+
         for date_remove in dates:
             df_old = df_old[df_old['date'] != str(date_remove)]
 
@@ -835,7 +840,7 @@ def compute_live_rt(path, path_comp_sol):
     df_2019_live = add_individual_ratings(df_2019_live)
     df_2019_live = df_2019_live.groupby(['broadcast_id', 'date'])['individual_Rt-T_live'].sum()
 
-    df_2019_live.to_csv(path_comp_sol)
+    df_2019_live.to_csv(path_comp_sol, header=True)
 
 
 def compute_tsv_rt(path, path_comp_sol):
@@ -855,7 +860,7 @@ def compute_tsv_rt(path, path_comp_sol):
     df_2019_tsv = df_2019_tsv.groupby(['broadcast_id'])['individual_Rt-T_tsv'].sum().to_frame()
     df_2019_tsv = df_2019_tsv.reset_index(level=0)
 
-    df_2019_tsv.to_csv(path_comp_sol)
+    df_2019_tsv.to_csv(path_comp_sol, header=True)
 
 
 def verify_live_table(path_comp_sol, path_infosys_sol, comparison_path):
@@ -939,7 +944,9 @@ def check_ratings_shows():
 
 
 def compute_rating_per_channel(path):
-
+    """
+    Check if all the channels live ratings are over 0
+    """
     date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
     df_2019_live = pd.read_csv(path, parse_dates=date_cols)
 
@@ -953,4 +960,142 @@ def compute_rating_per_channel(path):
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+# TODO Work ongoing
+# show_startime endtime clip on them, äuä nid
+def infosys_comp():
 
+    infosys_val = pd.read_csv('/home/floosli/Downloads/marketshare (15.12.2019).txt', skiprows=3, sep='|',
+                              encoding='latin-1', usecols=[0, 1, 2, 18],
+                              names=['Datum', 'Zeitschienen', 'station', 'rating'])
+    infosys_val = infosys_val[infosys_val['Datum'] != 'Last N Weeks']
+    infosys_val = infosys_val[infosys_val['Zeitschienen'] != 'Whole day']
+
+    infosys_val = infosys_val[infosys_val['station'] == '3+']
+    infosys_val['date'] = infosys_val['Datum'].str[6:10] + '-' + infosys_val['Datum'].str[3:5] + '-' + infosys_val['Datum'].str[:2]
+
+    infosys_val['StartTime'] = infosys_val['date'].astype(str) + ' ' + infosys_val['Zeitschienen'].str[:8]
+    infosys_val['EndTime'] = infosys_val['date'].astype(str) + ' ' + infosys_val['Zeitschienen'].str[11:20]
+
+    infosys_val['StartTime'] = infosys_val['StartTime'].str.replace(' 24', ' 00')
+    infosys_val['StartTime'] = infosys_val['StartTime'].str.replace(' 25', ' 01')
+
+    infosys_val['EndTime'] = infosys_val['EndTime'].str.replace(' 24', ' 00')
+    infosys_val['EndTime'] = infosys_val['EndTime'].str.replace(' 25', ' 01')
+
+    infosys_val['StartTime'] = pd.to_datetime(infosys_val['StartTime'], errors='coerce')
+    infosys_val['EndTime'] = pd.to_datetime(infosys_val['EndTime'], errors='coerce')
+
+    new_day_thresh = pd.to_datetime('020000', format='%H%M%S').time()
+    infosys_val.loc[infosys_val['StartTime'].dt.time < new_day_thresh, 'StartTime'] += pd.to_timedelta('1 Days')
+    infosys_val.loc[infosys_val['EndTime'].dt.time <= new_day_thresh, 'EndTime'] += pd.to_timedelta('1 Days')
+
+    infosys_val = infosys_val.dropna()
+
+    df_tsv = get_tsv_facts_table()[0]
+    df_tsv = df_tsv[df_tsv['station'] == '3+']
+
+    df_tsv['RecordingStartTime'] = df_tsv['RecordingStartTime'].astype(str).str.replace(' 24', ' 00')
+    df_tsv['RecordingStartTime'] = df_tsv['RecordingStartTime'].astype(str).str.replace(' 25', ' 01')
+
+    df_tsv['RecordingEndTime'] = df_tsv['RecordingEndTime'].astype(str).str.replace(' 24', ' 00')
+    df_tsv['RecordingEndTime'] = df_tsv['RecordingEndTime'].astype(str).str.replace(' 25', ' 01')
+
+    df_tsv['RecordingStartTime'] = pd.to_datetime(df_tsv['RecordingStartTime'], errors='coerce')
+    df_tsv['RecordingEndTime'] = pd.to_datetime(df_tsv['RecordingEndTime'], errors='coerce')
+
+    df_tsv['ViewingStartTime'] = df_tsv['ViewingStartTime'].astype(str).str.replace(' 24', ' 00')
+    df_tsv['ViewingStartTime'] = df_tsv['ViewingStartTime'].astype(str).str.replace(' 25', ' 01')
+
+    df_tsv['ViewingTime'] = df_tsv['ViewingTime'].astype(str).str.replace(' 24', ' 00')
+    df_tsv['ViewingTime'] = df_tsv['ViewingTime'].astype(str).str.replace(' 25', ' 01')
+
+    df_tsv['ViewingStartTime'] = pd.to_datetime(df_tsv['ViewingStartTime'], errors='coerce')
+    df_tsv['ViewingTime'] = pd.to_datetime(df_tsv['ViewingTime'], errors='coerce')
+
+    df_tsv = df_tsv.dropna()
+
+    df_lv = get_live_facts_table()[0]
+    df_lv = df_lv[df_lv['station'] == '3+']
+
+    df_lv['StartTime'] = df_lv['StartTime'].astype(str).str.replace(' 24', ' 00')
+    df_lv['StartTime'] = df_lv['StartTime'].astype(str).str.replace(' 25', ' 01')
+
+    df_lv['EndTime'] = df_lv['EndTime'].astype(str).str.replace(' 24', ' 00')
+    df_lv['EndTime'] = df_lv['EndTime'].astype(str).str.replace(' 25', ' 01')
+
+    df_lv['StartTime'] = pd.to_datetime(df_lv['StartTime'], errors='coerce')
+    df_lv['EndTime'] = pd.to_datetime(df_lv['EndTime'], errors='coerce')
+    df_lv = df_lv.dropna()
+
+    results = list()
+    for date in infosys_val['Datum'].unique():
+
+        result = 0
+        zeitschiene = infosys_val[infosys_val['Datum'] == date].copy()
+
+        for index, row in zeitschiene.iterrows():
+
+            temp = pd.DataFrame()
+            temp['duration'] = (((df_tsv['RecordingEndTime'].clip(upper=row['EndTime']) -
+                                 df_tsv['RecordingStartTime'].clip(lower=row['StartTime'])).dt.total_seconds()) *
+                                df_tsv['Weights']) / df_tsv['program_duration']
+            temp = temp[temp['duration'] >= 0]
+            if not temp.empty:
+                result += temp['duration'].sum()/1000
+
+            temp2 = pd.DataFrame()
+            temp2['duration'] = (((df_lv['EndTime'].clip(upper=row['EndTime']) -
+                                 df_lv['StartTime'].clip(lower=row['StartTime'])).dt.total_seconds()) *
+                                 df_lv['Weights']) / df_lv['program_duration']
+            temp2 = temp2[temp2['duration'] >= 0]
+            if not temp2.empty:
+                result += temp2['duration'].sum()/1000
+
+        results.append(result)
+        break
+
+    print(results)
+    print(infosys_val.groupby(['Datum'])['rating'].sum())
+
+
+# Compute the timeframe of interest
+# Compute overall Rating produced in this timeframe
+# specific rating / overall produced rating = MA
+def compute_individual_ma_live(df, dates):
+
+    result = pd.DataFrame()
+    org = df.copy(deep=True)
+
+    df = df[(df['station'] == '3+')].reset_index(drop=True)
+    df = add_individual_ratings(df)
+
+    for date in dates:
+        print(date)
+        brc = get_brc(date)
+        brc = brc[brc['ChannelCode'] == 8216].reset_index(drop=True)
+        df_date = df[df['date'] == date]
+
+        for index, row in brc.iterrows():
+            if index % 100 == 0:
+                print(index)
+
+            temp = pd.DataFrame()
+            filt = org[~(org['EndTime'] < row['StartTime']) & ~(org['StartTime'] > row['EndTime']) &
+                       ~(org['show_endtime'] < row['StartTime']) & ~(org['show_starttime'] > row['EndTime'])]\
+                .reset_index(drop=True)
+
+            temp['RT'] = (((filt['EndTime'].clip(upper=row['EndTime']) - filt['StartTime'].clip(lower=row['StartTime']))
+                          .dt.total_seconds() * filt['Weights']) / (row['Duration']))
+
+            whole_rt = temp[temp['RT'] >= 0]['RT'].sum()
+
+            df_ma = df_date.groupby(['broadcast_id', 'Title', 'Description', 'date'])['individual_Rt-T_live']\
+                .sum().reset_index()
+            if df_ma.empty:
+                continue
+
+            df_ma = df_ma[df_ma['broadcast_id'] == row['BrdCstId']]
+            df_ma['MA_live'] = df_ma['individual_Rt-T_live'] / whole_rt
+            result = pd.concat([result, df_ma], axis=0)
+
+    result.to_csv('/home/floosli/Documents/PIN_Data/solutions/Marketshare.csv', header=True)

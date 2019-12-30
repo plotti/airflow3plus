@@ -1,6 +1,7 @@
 import Airflow_Variables
 import Transformations_Weekly_Reports
 import Plotly_Graph_Heavy_Viewers
+import Plotly_Metrics_Eps
 import smtplib
 import logging
 import os
@@ -181,6 +182,15 @@ def create_heavy_viewer_report():
     logging.info('Created the plotly table and saved it locally as .html file')
 
 
+# TODO adjust show
+def create_metrics_eps():
+    """
+    Create the div for the plotly div of the EPs metrics
+    """
+    Plotly_Metrics_Eps.generate_graphs_eps('Der Bachelor')
+    logging.info('Graphs for the metrics eps generated')
+
+
 def send_mail_plotly_graph():
     """
     Send an html file of the plotly table to all recipients
@@ -189,8 +199,10 @@ def send_mail_plotly_graph():
     COMMASPACE = ', '
     msg = MIMEMultipart()
     msg['Subject'] = f'[HeavyViewersTool] Updated Version'
-    recipients = ['floosli@3plus.tv', 'hb@3plus.tv', 'LHE@3plus.tv']  # , 'TP@3plus.tv', 'KH@3plus.tv', 'hb@3plus.tv',
-    # 'plotti@gmx.net', 'LHE@3plus.tv', 'Ute.vonMoers@chmedia.ch'] # TODO
+    recipients = ['floosli@3plus.tv', 'hb@3plus.tv', 'LHE@3plus.tv', 'KH@3plus.tv', 'PS@3plus.tv', 'TP@3plus.tv',
+                  'KH@3plus.tv', 'plotti@gmx.net', 'Ute.vonMoers@chmedia.ch', 'roger.elsener@chmedia.ch',
+                  'Lola.Gimferrer@chmedia.ch', 'Salvatore.Ceravolo@chmedia.ch', 'SK@3plus.tv',
+                  'AH@3plus.tv', 'TH@3plus.tv', 'sva@3plus.tv', 'lschweigart@3plus.tv']
     msg['From'] = 'Harold Bessis <hb@3plus.tv>'
     msg['To'] = COMMASPACE.join(recipients)
     body = f"Hallo Zusammen, \n\nIm Anhang findet Ihr das HeavyViewersTool mit den aktualisierten Werten,"
@@ -219,7 +231,18 @@ Task_Generate_Plotly_Tool = PythonOperator(
     priority_weight=1,
     dag=dag_weekly_reports
 )
-
+"""
+Task_Generate_Plotly_Metrics = PythonOperator(
+    task_id='Metrics_Eps',
+    provide_context=False,
+    python_callable=create_metrics_eps,
+    retries=3,
+    retry_delay=timedelta(minutes=1),
+    execution_timeout=timedelta(hours=1),
+    priority_weight=1,
+    dag=dag_weekly_reports
+)
+"""
 Task_Send_Mail = PythonOperator(
     task_id='Send_Mail',
     provide_context=False,
@@ -270,6 +293,7 @@ Task_Push_Oldest_Xcom = PythonOperator(
 # Schedule of Tasks
 Task_Generate_Plotly_Tool >> Task_Send_Mail
 Task_Update_Heatmap >> Task_Delete_Xcom_Oldest >> Task_Push_Oldest_Xcom
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 
