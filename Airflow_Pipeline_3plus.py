@@ -343,7 +343,7 @@ def check_hash_of_new_files(regular_dates, irregular_dates):
 
 def detect_correct_dates():
     """
-    Remove dates did not get updated
+    Remove dates which did not get updated, compare the hashes of the files for this task
     """
     pusher = xcom.XCom
     regular_dates = extract_regular_dates()
@@ -456,6 +456,7 @@ Sensor_Regular_Files = Sensors_3plus.SensorRegularFiles(
     do_xcom_push=True,
     dag=dag_3plus
 )
+
 # Download regular files to a temporary directory before continuing with the update
 Task_Download_Regular_Files = PythonOperator(
     task_id='Download_regular_files',
@@ -492,6 +493,7 @@ Sensor_Irregular_Files = Sensors_3plus.SensorIrregularFiles(
     do_xcom_push=True,
     dag=dag_3plus
 )
+
 # Download irregular files to a temporary directory before moving to further update
 Task_Download_Irregular_Files = PythonOperator(
     task_id='Download_irregular_files',
@@ -564,7 +566,7 @@ SensorValidity = Sensors_3plus.SensorVerifyFactsTables(
     timeout=600,
     soft_fail=False,
     mode='reschedule',
-    on_failure_callback=fail_slack_alert,
+    on_failure_callback=None,  # TODO fail_slack_alert
     trigger_rule='all_done',
     do_xcom_push=True,
     dag=dag_3plus
@@ -576,10 +578,11 @@ Task_Delete_Xcom_Variables = SqliteOperator(
     sqlite_conn_id=SQL_ALCHEMY_CONN,
     trigger_rule='all_done',
     on_failure_callback=fail_slack_alert,
+    priority_weight=2,
     dag=dag_3plus
 )
-# Delete the content of the temp dir for a rounded execution and no remaining files in future iteration
-Task_Delete_Content_temp_dir = PythonOperator(
+
+Task_Delete_Content_Temp_Dir = PythonOperator(
     task_id='Delete_content_temp_dir',
     provide_context=True,
     python_callable=delete_content_temp_dir,
@@ -587,6 +590,8 @@ Task_Delete_Content_temp_dir = PythonOperator(
     retry_delay=timedelta(seconds=5),
     execution_timeout=timedelta(minutes=1),
     on_failure_callback=fail_slack_alert,
+    trigger_rule='all_done',
+    priority_weight=1,
     dag=dag_3plus
 )
 
@@ -596,10 +601,11 @@ Task_Delete_Content_temp_dir = PythonOperator(
 # Scheduling is not allowed to contain any circles or repetitions of the same task
 # A graphical view of the DAG is given in the GUI
 # Schedule of Tasks:
-Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Detect_Dates >> Task_Update_Facts_Table
-Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Detect_Dates >> Task_Update_Facts_Table
-Task_Update_Facts_Table >> SensorInfosysExtract >> SensorValidity
-SensorValidity >> Task_Delete_Xcom_Variables >> Task_Delete_Content_temp_dir
+Sensor_Regular_Files >> Task_Download_Regular_Files >> Task_Detect_Dates
+Sensor_Irregular_Files >> Task_Download_Irregular_Files >> Task_Detect_Dates
+
+Task_Detect_Dates >> Task_Update_Facts_Table >> SensorInfosysExtract >> SensorValidity
+SensorValidity >> [Task_Delete_Xcom_Variables, Task_Delete_Content_Temp_Dir]
 
 
 # ----------------------------------------------------------------------------------------------------------------------

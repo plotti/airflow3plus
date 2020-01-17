@@ -39,7 +39,8 @@ list_EPs = [['Der Bachelor', '3+: First Runs'], ['Die Bachelorette', '3+: First 
 name_EPs = ['Der Bachelor', 'Die Bachelorette', 'Adieu Heimat - Schweizer wandern aus',
             'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester']
 
-dates_EPs = pd.read_pickle('/home/floosli/Documents/epdates_.pkl')
+dates_EPs = pd.read_pickle('/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
+                           'Projects/P38 Zapping sequences clustering (Heatmaps & more)/epdates_.pkl')
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -135,30 +136,38 @@ def analyse_heavy_viewers():
     Compute the potential of stealing heavy viewers from each other
     :return: None
     """
-    df_19_lv = Pin_Functions.get_live_facts_table()[0]
+    df_20_lv = Pin_Functions.get_live_facts_table()[0]
+    df_20_lv = Pin_Functions.add_individual_ratings(df_20_lv)
+
+    df_19_lv = Pin_Functions.get_older_facts_table(year=2019)[0]
     df_19_lv = Pin_Functions.add_individual_ratings(df_19_lv)
 
-    df_18_lv = Pin_Functions.get_older_facts_table()[0]
+    df_18_lv = Pin_Functions.get_older_facts_table(year=2018)[0]
     df_18_lv = Pin_Functions.add_individual_ratings(df_18_lv)
 
-    df_lv = pd.concat([df_19_lv, df_18_lv], axis=0)
+    df_lv = pd.concat([df_20_lv, df_19_lv, df_18_lv], axis=0)
     df_lv = df_lv.rename(columns={'individual_Rt-T_live': 'individual_Rt-T'})
     del df_18_lv
     del df_19_lv
+    del df_20_lv
 
-    df_19_tsv = Pin_Functions.get_tsv_facts_table()[0]
+    df_20_tsv = Pin_Functions.get_tsv_facts_table()[0]
+    df_20_tsv = Pin_Functions.add_individual_ratings_ovn(df_20_tsv)
+
+    df_19_tsv = Pin_Functions.get_older_facts_table(year=2019)[1]
     df_19_tsv = Pin_Functions.add_individual_ratings_ovn(df_19_tsv)
 
-    df_18_tsv = Pin_Functions.get_older_facts_table()[1]
+    df_18_tsv = Pin_Functions.get_older_facts_table(year=2018)[1]
     df_18_tsv = Pin_Functions.add_individual_ratings_ovn(df_18_tsv)
 
-    df_tsv = pd.concat([df_19_tsv, df_18_tsv], axis=0)
+    df_tsv = pd.concat([df_20_tsv, df_19_tsv, df_18_tsv], axis=0)
     df_tsv = df_tsv.rename(columns={'RecordingEndTime': 'EndTime',
                                     'RecordingStartTime': 'StartTime',
                                     'individual_Rt-T_tsv': 'individual_Rt-T'})
     df_tsv = df_tsv[df_lv.columns]
     del df_18_tsv
     del df_19_tsv
+    del df_20_tsv
 
     df = pd.concat([df_lv, df_tsv], axis=0)
     del df_lv

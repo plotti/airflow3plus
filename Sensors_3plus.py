@@ -304,9 +304,9 @@ class SensorVerifyFactsTables(BaseSensorOperator):
                                   include_prior_dates=True)
 
         dates = set()
-        for date in updates:
+        for update in updates:
             try:
-                val = json.loads(date.value)
+                val = json.loads(update.value)
                 dates.update({val})
             except TypeError as e:
                 logging.info('Unfortunately got %s, will continue as planed' % str(e))
@@ -329,13 +329,12 @@ class SensorVerifyFactsTables(BaseSensorOperator):
             logging.info('All channels have a rating above 0, nothing suspicious')
 
         # Check the facts table rating values
-        results = Pin_Functions.check_ratings_shows()
-        if abs(results[0]) > 0.1:
-            logging.info('The live facts table has a difference of %.2f' % results[0])
-            condition = False
+        results = Pin_Functions.infosys_comparison()
+        if abs(results) > 0.1:
+            logging.info('The facts table has a difference of %.2f' % results)
         else:
             logging.info('The computed rating of our facts table are in the range of correctness')
-            logging.info('Live Difference: %.2f, TSV Difference: %.2f' % (results[0], results[1]))
+            logging.info('Difference' % results)
 
         try:
             with open(f'{local_path}Crit.pin', 'r', encoding='latin-1') as f:
@@ -358,27 +357,31 @@ class SensorVerifyFactsTables(BaseSensorOperator):
             except FileNotFoundError as e:
                 logging.info('Got %s even though it should exist' % str(e))
                 condition = False
+            try:
+                # Check Socdem and Weights, # Ids has to be the same:
+                if len(df_wei['SampledIdRep'].unique()) != len(df_socdem['SampleId'].unique()):
+                    logging.info('The amount of IDs to no match in Weights and SocDem')
+                    condition = False
+                else:
+                    logging.info('The number of IDs match in Weights and SocDem')
 
-            # Check Socdem and Weights, # Ids has to be the same:
-            if len(df_wei['SampledIdRep'].unique()) != len(df_socdem['SampleId'].unique()):
-                logging.info('The amount of IDs to no match in Weights and SocDem')
-                condition = False
-            else:
-                logging.info('The number of IDs match in Weights and SocDem')
+                # Check SocDem values, if for each aspect a description exist
+                if (len(df_socdem.columns) - 3) != len(df_crit.index):
+                    logging.info('There is not a value for every SocDem value in the Crit file')
+                    condition = False
+                else:
+                    logging.info('There are enough SocDem values in Crit')
 
-            # Check SocDem values, if for each aspect a description exist
-            if (len(df_socdem.columns) - 3) != len(df_crit.index):
-                logging.info('There is not a value for every SocDem value in the Crit file')
-                condition = False
-            else:
-                logging.info('There are enough SocDem values in Crit')
+                # Check if amount of unique channels in the BrdCst file is nothing unusual
+                if len(df_brc['ChannelCode'].unique()) < 50 or len(df_brc['ChannelCode'].unique()) > 75:
+                    logging.info('Unusual amount of channels detected in the BrdCst file')
+                    condition = False
+                else:
+                    logging.info('Nothing suspect in the amount of channels in BrdCst file')
 
-            # Check if amount of unique channels in the BrdCst file is nothing unusual
-            if len(df_brc['ChannelCode'].unique()) < 50 or len(df_brc['ChannelCode'].unique()) > 75:
-                logging.info('Unusual amount of channels detected in the BrdCst file')
+            except NameError as e:
+                logging.info(f'A Dataframe was not defined, {e}')
                 condition = False
-            else:
-                logging.info('Nothing suspect in the amount of channels in BrdCst file')
 
         # Check if there are the same amount of files of each kind
         if (len(next(os.walk(local_path + 'SocDem/'))[2]) != len(next(os.walk(local_path + 'Weight/'))[2])) or\
@@ -392,7 +395,11 @@ class SensorVerifyFactsTables(BaseSensorOperator):
 
 
 class SensorInfosysExtract(BaseSensorOperator):
-
+    """
+    Sensor to extract the last infosys extract.
+    The extract is expected to be uploaded last friday, and has to comfort the expected path on the ftp server.
+    Atm based on the logic the file be extracted on tuesday on the other days the sensor will return false.
+    """
     @apply_defaults
     def __init__(
             self,
@@ -416,7 +423,7 @@ class SensorInfosysExtract(BaseSensorOperator):
 
             self.log.info('Checking if last fridays a Infosysextract was uploaded')
 
-            local_path = '/home/floosli/Documents/PIN_Data/temp/infosys_ex.txt'
+            local_path = '/home/floosli/Documents/PIN_Data/solutions/infosys_extract.txt'
 
             today = date.today()
             last_friday_upload = today - timedelta(days=3+5)
@@ -426,9 +433,10 @@ class SensorInfosysExtract(BaseSensorOperator):
 
             try:
                 self.log.info(f'A Infosys extract was uploaded, the values will be checked')
-                hook.retrieve_file(remote_full_path=server_path, local_full_path_or_buffer=local_path)
+                if hook.get_mod_time(server_path):
+                    hook.retrieve_file(remote_full_path=server_path, local_full_path_or_buffer=local_path)
                 return True
 
             except ftplib.error_perm as e:
                 self.log.info(f'There was no file uploaded last friday {e}')
-                return False
+                return True

@@ -90,7 +90,7 @@ def generate_plotly_table():
                                     "between the show on the left side to the show writen on top<br>"
                                     "This relation can be used to determine good trailer<br>"
                                     "placement of other shows and many more things.",
-                               showarrow=False, x=x+0.015, xref='paper',
+                               showarrow=False, x=x+0.02, xref='paper',
                                y=y - 0.9, yref="paper",
                                align="left", xanchor='right')]
 
@@ -157,19 +157,20 @@ def generate_plotly_table():
         )
         y -= 0.05
 
+    """dict(label='All Shows',
+         args=[{'header': {'values': list(df.columns), 'line_color': 'darkslategray'},
+                "cells": {'values': df.T.values,
+                          'height': 60}},
+               {'title': None,
+                'width': 8000,
+                'annotations': annotation_english}
+               ],
+         method="update"
+         ),"""
+
     show_list.append(go.layout.Updatemenu(
         type='dropdown',
         buttons=list([
-            dict(label='All Shows',
-                 args=[{'header': {'values': list(df.columns), 'line_color': 'darkslategray'},
-                        "cells": {'values': df.T.values,
-                                  'height': 60}},
-                       {'title': None,
-                        'width': 8000,
-                        'annotations': annotation_english}
-                       ],
-                 method="update"
-                 ),
             dict(label='Clear',
                  args=[{'header': {'values': None},
                         "cells": {'values': None,
@@ -200,7 +201,7 @@ def generate_plotly_table():
         xanchor='right',
         y=y,
         yanchor='top',
-        active=2
+        active=1
         )
     )
 

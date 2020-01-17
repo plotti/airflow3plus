@@ -190,6 +190,8 @@ def create_metrics_eps():
     Plotly_Metrics_Eps.generate_graphs_eps('Der Bachelor')
     logging.info('Graphs for the metrics eps generated')
 
+    Plotly_Metrics_Eps.gather_metrics()
+
 
 def send_mail_plotly_graph():
     """
@@ -214,7 +216,7 @@ def send_mail_plotly_graph():
         att = MIMEApplication(f.read(), Name='HeavyViewersTool.html')
         msg.attach(att)
 
-    s = smtplib.SMTP(host='10.3.3.103', port=25)
+    s = smtplib.SMTP('3plus-tv.mail.protection.outlook.com:25')
     s.send_message(msg)
     s.quit()
     logging.info('The email has been sent, the receivers will be notified shortly')
@@ -242,7 +244,7 @@ Task_Generate_Plotly_Metrics = PythonOperator(
     priority_weight=1,
     dag=dag_weekly_reports
 )
-"""
+
 Task_Send_Mail = PythonOperator(
     task_id='Send_Mail',
     provide_context=False,
@@ -255,7 +257,7 @@ Task_Send_Mail = PythonOperator(
     on_failure_callback=fail_slack_alert,
     dag=dag_weekly_reports
 )
-
+"""
 Task_Update_Heatmap = PythonOperator(
     task_id='Update_Heatmap',
     provide_context=False,
@@ -291,7 +293,7 @@ Task_Push_Oldest_Xcom = PythonOperator(
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Schedule of Tasks
-Task_Generate_Plotly_Tool >> Task_Send_Mail
+Task_Generate_Plotly_Tool
 Task_Update_Heatmap >> Task_Delete_Xcom_Oldest >> Task_Push_Oldest_Xcom
 
 

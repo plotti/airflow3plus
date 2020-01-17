@@ -4,26 +4,39 @@ from datetime import datetime
 """
 This class is only used to synchronize variables which are used in multiple files and scripts
 Change the variables here to ensure global change of the respective parameter
+
 local_path: Path to the local directory
 remote_path: Path to the remote directory on the FTP-server
+table_viewers_path: Table of the viewers of a channel
+vorwoche_path: Save the Excel for the vorwoche zuschauer
+steal_pot_path: Path to the heavy viewers excel sheet
+heatmap_path: Path to the Heatmap
+dropbox_path: Path to my dropbox
+flask_path: Path to the files for the flask application
 suffix: Current suffix of almost every file on the FTP-server
-regular_file_list: Current list of all regular file names
-irregular_file_list: Current list of all irregular file names
-relevant_channels: Channels which are core of our analysis and belong to our group
-channels_of_interest: Channels which stand in direct competition to our products and are interesting for our analysis
-sensor_in_past: Amount of days the sensor senses into the past
-days_in_year: Amount of days in a year
-days_tsv: Amount of days relevant for time-shifted viewing
-adjust_year: To change away from the current year set a negative integer on how far back you want to go. range[-2,0]
+
 ftp_conn_id: Current Id of the ftp connection on the airflow webserver
 sql_alchemy_conn: Current Id of the sql_alchemy Db on the airflow webserver, database where the xcom variables
 are stored
 slack_conn_id: Current Id of the slack connection on the airflow webserver
+infosys_conn: FTconnection id to the automated Infosys extracts
+
+sensor_in_past: Amount of days the sensor senses into the past
+days_in_year: Amount of days in a year
+days_tsv: Amount of days relevant for time-shifted viewing
+adjust_year: To change away from the current year set a negative integer on how far back you want to go. range[-2,0]
 year: Year currently interesting for us
 month: Current month which are we interested in 
 day: Current day of interest
 start: Start date to begin various things, usually start of a year
 end: End date for our analysis, usually last day of the year
+
+regular_file_list: Current list of all regular file names
+irregular_file_list: Current list of all irregular file names
+
+relevant_channels: Channels which are core of our analysis and belong to our group
+channels_of_interest: Channels which stand in direct competition to our products and are interesting for our analysis
+
 shows_lists: Lists of the most popular channels on each channel of our main group, movies and 
 one time events are excluded
 """
@@ -44,28 +57,29 @@ class AirflowVariables:
         self.flask_path = '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Flask_Application/'
         self.suffix = '.pin'
 
-        self.regular_file_list = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
-        self.irregular_file_list = ['Station', 'CritCode', 'Crit']
-        self.relevant_channels = ['3+', '4+', '5+', '6+', 'TV24', 'TV25', 'S1']
-        self.channels_of_interest = self.relevant_channels + ["RTL CH", "RTL II CH", "VOX CH", "SUPER RTL CH",
-                                                              "NITRO CH", "ProSieben CH", "SRF 1", "SRF zwei",
-                                                              "SRF info", "ZDF", "ARD", "Puls 8", "kabel eins CH",
-                                                              "SAT.1 CH", "DMAX CH", 'ORF Eins', 'ORF 2']
         self.sensor_in_past = 10
         self.days_in_year = 365
         self.days_tsv = 8
         self.adjust_year = 0
+        self.year = datetime.now().year + self.adjust_year
+        self.month = datetime.now().month
+        self.day = datetime.now().day
+        self.start = str(self.year) + '0101'
+        self.end = str(self.year) + '1231'
 
         self.ftp_conn_id = 'ftp_server_pin_data'
         self.sql_alchemy_conn = 'sql_alchemy_conn'
         self.slack_conn_id = 'slack'
         self.infosys_ftp_conn_id = 'infosys_conn'
 
-        self.year = datetime.now().year + self.adjust_year
-        self.month = datetime.now().month
-        self.day = datetime.now().day
-        self.start = str(self.year) + '0101'
-        self.end = str(self.year) + '1231'
+        self.regular_file_list = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
+        self.irregular_file_list = ['Station', 'CritCode', 'Crit']
+
+        self.relevant_channels = ['3+', '4+', '5+', '6+', 'TV24', 'TV25', 'S1']
+        self.channels_of_interest = self.relevant_channels + ["RTL CH", "RTL II CH", "VOX CH", "SUPER RTL CH",
+                                                              "NITRO CH", "ProSieben CH", "SRF 1", "SRF zwei",
+                                                              "SRF info", "ZDF", "ARD", "Puls 8", "kabel eins CH",
+                                                              "SAT.1 CH", "DMAX CH", 'ORF Eins', 'ORF 2']
 
         self.shows_3plus = [['Der Bachelor', '3+'], ['Die Bachelorette', '3+'],
                             ['Adieu Heimat - Schweizer wandern aus', '3+'], ['Hawaii Five-0', '3+'],
@@ -108,5 +122,8 @@ class AirflowVariables:
                          ['Stalked - Leben in Angst', 'S1'], ['Eine schrecklich nette Familie', 'S1'],
                          ['Rick der Restaurator', 'S1'], ['Hard Time', 'S1'], ['Diggers - Die Schatzsucher', 'S1'],
                          ['Überleben!', 'S1'], ['Super-Fabriken', 'S1']]
+
+        self.bad_channels_list = ['WELT CH', 'Sport 1 CH']  # Insufficient broadcast file, lot of holes, Not used atm
+
 
 # ----------------------------------------------------------------------------------------------------------------------

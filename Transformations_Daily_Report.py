@@ -236,7 +236,7 @@ def send_mail(date, date_day_b4, date_week_b4, fname_day_b4, fname_week_b4):
             att = MIMEApplication(f.read(), Name=basename(file))
             msg.attach(att)
 
-    s = smtplib.SMTP('10.3.3.103', port=25)
+    s = smtplib.SMTP('3plus-tv.mail.protection.outlook.com:25')
     s.send_message(msg)
     s.quit()
     logging.info('The email has been sent, the receivers will be notified shortly')

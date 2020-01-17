@@ -41,7 +41,7 @@ def load_data():
 
     date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
     df = pd.read_csv('/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
-                     'Projects/data/Processed_pin_data/updated_live_facts_table.csv',
+                     'Projects/data/Processed_pin_data/20190101_20191231_Live_DE_15_49_mG.csv',
                      parse_dates=date_cols,
                      dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
                             'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
@@ -133,15 +133,14 @@ def generate_graphs_eps(show):
     df = load_data()
 
     # TODO how to get the recent 3 dates?
-    # dates = load_dates_eps(show)
+    dates = load_dates_eps(show)[-3:]
     colors = ['rgb(49,130,189)', 'rgb(115,115, 189)', 'rgb(189,189,189)']
-    dates = ['20191125', '20191202', '20191209']
 
     fig = go.Figure()
 
     i = 0
     buttons = list()
-    buttons.append(dict(label='None',
+    buttons.append(dict(label=show,
                         method='update',
                         args=[{'visible': [True, True, True]}]
                         ))
@@ -162,19 +161,6 @@ def generate_graphs_eps(show):
                             args=[{'visible': [visibility(now, date) for now in dates]}]
                             ))
         i += 1
-
-    fig.update_layout(
-        updatemenus=[
-            go.layout.Updatemenu(
-                type='buttons',
-                direction='right',
-                active=0,
-                x=0.80,
-                y=1.20,
-                buttons=list(buttons)
-            )
-        ]
-    )
 
     fig.update_layout(title=f'Rating over the course of a evening of <b>{show}</b>',
                       xaxis=dict(
@@ -197,7 +183,7 @@ def generate_graphs_eps(show):
                           showline=True,
                           zeroline=True,
                           ticks='outside',
-                          range=[0, 80]
+                          range=[0, 100]
                       ),
                       legend=dict(
                           font_size=14,
@@ -207,13 +193,13 @@ def generate_graphs_eps(show):
                       showlegend=True,
                       plot_bgcolor='white',
                       autosize=False,
-                      width=900,
+                      width=800,
                       height=400
                       )
 
     div = plotly.offline.plot(fig, show_link=False, output_type="div", include_plotlyjs=True)
 
-    with open(PATH + 'Metrics/plotly_metrics_div.txt', 'w') as f:
+    with open(f'{PATH}Metrics/plotly_metrics_{show}.txt', 'w') as f:
         f.write(div)
 
 
@@ -233,7 +219,9 @@ def gather_metrics(eps):
         df_filt_ep = df_lv[(df_lv['program_duration'] > 600) & (df_lv['station'] == '3+') &
                            (df_lv['date'].isin(dates)) & (df_lv['Title'] == show)]
         f = {'Live_Rating': 'sum', 'date': 'first'}
+
         df_ep = df_filt_ep.groupby(['Description'])['Live_Rating', 'date'].agg(f)
+
         df_ep = df_ep.reset_index(drop=False)
         df_ep = df_ep.round(2)
 
@@ -256,6 +244,8 @@ def gather_metrics(eps):
         df_ep = pd.concat([df_ep, sec_watched], axis=1)
         df_ep[['#viewers', 'avg. seconds']] = df_ep[['#viewers', 'avg. seconds']].round(0)
 
+        df_ep = df_ep[['date', 'Description', 'Live_Rating', '#viewers', 'avg. seconds']]
+
         df_ep.to_excel(writer, sheet_name=show)
         worksheet = writer.sheets[show]
         for idx, col in enumerate(df_ep):
@@ -272,11 +262,11 @@ def generate_frame_eps():
     gather_metrics(eps)
 
     shows_list = list()
+    filter_list = list()
     x = 0
-    y = 1.05
+    y = 1.00
 
     for show in eps:
-        filter_list = list()
 
         df = pd.read_excel(PATH + 'Metrics/plotly_metrics.xlsx', sheet_name=show, header=0)
         df = df.drop(columns=['Unnamed: 0']).reset_index(drop=True)
@@ -285,29 +275,30 @@ def generate_frame_eps():
                                 method='update',
                                 args=[{'header': {'values': df.columns},
                                        "cells": {'values': df.T.values}},
-                                      {'title': f'Metrics of {show}',
-                                       'width': 800}
+                                      {'title': f'Stats of {show}',
+                                       'width': 1900}
                                       ]
                                 )
                            )
-        # for each season a selection
-        shows_list.append(go.layout.Updatemenu(
-            type='dropdown',
-            buttons=list(
-                filter_list
-            ),
-            direction='down',
-            pad={"r": 10, "t": 15},
-            showactive=True,
-            visible=True,
-            active=0,
-            x=x,
-            xanchor='right',
-            y=y,
-            yanchor='top',
-            )
+
+    # for each season a selection
+    shows_list.append(go.layout.Updatemenu(
+        type='dropdown',
+        buttons=list(
+            filter_list
+        ),
+        direction='down',
+        pad={"r": 10, "t": 15},
+        showactive=True,
+        visible=True,
+        active=0,
+        x=x,
+        xanchor='right',
+        y=y,
+        yanchor='top',
         )
-        y -= 0.05
+    )
+    y -= 0.05
 
     fig = go.Figure()
 
@@ -330,12 +321,19 @@ def generate_frame_eps():
         )
     )
 
-    fig.update_layout(updatemenus=shows_list, dragmode='pan', height=1000, width=800)
+    fig.update_layout(updatemenus=shows_list, dragmode='pan', height=1000, width=1900)
 
-    fig.show()
-    """
     div = plotly.offline.plot(fig, show_link=False, output_type="div", include_plotlyjs=True)
 
     with open(PATH + 'Metrics/plotly_table_div.txt', 'w') as f:
         f.write(div)
-    """
+
+
+eps = ['Der Bachelor', 'Die Bachelorette', 'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester']
+
+gather_metrics(eps)
+generate_frame_eps()
+"""
+for show in eps:
+    generate_graphs_eps(show)
+"""
