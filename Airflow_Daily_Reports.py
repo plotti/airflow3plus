@@ -27,6 +27,9 @@ END_DAY = Airflow_var.end
 This DAG runs functions which are transformations from the facts table.
 Consequently most of the functions used in this DAG expect that both the live facts table and the 
 tsv facts table exist and are located at the given path.
+The two main functions implemented in this file are the computation of the vorwoche email which is send after each 
+new day in the facts table and the compute viewers of show which is actually not a used .pkl file for viewers of shows.
+Maybe one day it will be used, but so long it will be computed 
 """
 
 
@@ -63,7 +66,6 @@ def fail_slack_alert(context):
     return failed_alert.execute(context=context)
 
 
-# Default arguments for the DAG dag_3plus
 default_args = {
     'owner': '3plus',
     'depends_on_past': False,
@@ -71,7 +73,7 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
 }
-# DAG Definition and various setting influencing the workflow of the DAG
+
 dag_daily_reports = DAG(dag_id=DAG_ID,
                         description='DAG to update the viewers table for shows',
                         schedule_interval='0 10,22 * * 1-5',
@@ -138,15 +140,15 @@ def create_vorwoche_zuschauer():
     update = puller.get_one(key='newest_day', execution_date=datetime.now(timezone.utc), dag_id='dag_3plus',
                             include_prior_dates=True)
 
-    date = datetime.strptime(update, '%Y%m%d')
+    update_date = datetime.strptime(update, '%Y%m%d')
     recent_day = datetime.strptime(recent_day, '%Y%m%d')
     dates = set()
     while True:
-        date += timedelta(days=1)
-        if recent_day < date:
+        update_date += timedelta(days=1)
+        if recent_day < update_date:
             break
         else:
-            dates.update({date.strftime('%Y%m%d')})
+            dates.update({update_date.strftime('%Y%m%d')})
 
     if not dates:
         logging.info('No dates have to be updated, exiting')
@@ -158,6 +160,10 @@ def create_vorwoche_zuschauer():
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+# Sensor first if the facts table has been updated do start the update of these reports
+# Later in the process it also checks if in the last 4 days the facts table has been updated.
+# If this is not the case, have a look at the FTP-server of mediapulse or right a strongly worded email to them.
+# Bot consider during vacation/holidays it can happen quiet easily, do don't bother writing an email.
 Sensor_facts_table_change = Sensors_3plus.SensorFactsTable(
     task_id='Sensor_facts_table',
     local_path=LOCAL_PATH,
@@ -217,7 +223,7 @@ Task_Delete_Xcom_Variables = SqliteOperator(
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# Schedule of tasks
+# Schedule of tasks, same rule applies for creating the schedule as before
 Sensor_facts_table_change >> [Task_Generate_Report_Vorwoche, Task_Compute_Tables] >> Sensor_most_recent_update
 Sensor_most_recent_update >> Task_Delete_Xcom_Variables
 

@@ -328,10 +328,15 @@ class SensorVerifyFactsTables(BaseSensorOperator):
         else:
             logging.info('All channels have a rating above 0, nothing suspicious')
 
-        # Check the facts table rating values
-        results = Pin_Functions.infosys_comparison()
+        # Check the facts table rating values TODO
+        try:
+            results = Pin_Functions.infosys_comparison()
+        except ValueError as e:
+            logging.info(str(e))
+            results = 13
         if abs(results) > 0.1:
             logging.info('The facts table has a difference of %.2f' % results)
+            logging.info('if the result is exactly 13 the computation could not be loaded')
         else:
             logging.info('The computed rating of our facts table are in the range of correctness')
             logging.info('Difference' % results)
@@ -342,42 +347,37 @@ class SensorVerifyFactsTables(BaseSensorOperator):
         except FileNotFoundError as e:
             logging.info('Crit file is missing got %s' % str(e))
 
-        for date in dates:
+        for date_new in dates:
 
             try:
-                with open(f'{local_path}Weight/Weight_{date}.pin', 'r', encoding='latin-1') as f:
+                with open(f'{local_path}Weight/Weight_{date_new}.pin', 'r', encoding='latin-1') as f:
                     df_wei = pd.read_csv(f)
 
-                with open(f'{local_path}SocDem/SocDem_{date}.pin', 'r', encoding='latin-1') as f:
+                with open(f'{local_path}SocDem/SocDem_{date_new}.pin', 'r', encoding='latin-1') as f:
                     df_socdem = pd.read_csv(f, dtype='int32')
 
-                with open(f'{local_path}BrdCst/BrdCst_{date}.pin', 'r', encoding='latin-1') as f:
+                with open(f'{local_path}BrdCst/BrdCst_{date_new}.pin', 'r', encoding='latin-1') as f:
                     df_brc = pd.read_csv(f, dtype={'Date': 'object', 'StartTime': 'object', 'ChannelCode': 'int'})
 
             except FileNotFoundError as e:
                 logging.info('Got %s even though it should exist' % str(e))
                 condition = False
+
             try:
                 # Check Socdem and Weights, # Ids has to be the same:
                 if len(df_wei['SampledIdRep'].unique()) != len(df_socdem['SampleId'].unique()):
                     logging.info('The amount of IDs to no match in Weights and SocDem')
                     condition = False
-                else:
-                    logging.info('The number of IDs match in Weights and SocDem')
 
                 # Check SocDem values, if for each aspect a description exist
                 if (len(df_socdem.columns) - 3) != len(df_crit.index):
                     logging.info('There is not a value for every SocDem value in the Crit file')
                     condition = False
-                else:
-                    logging.info('There are enough SocDem values in Crit')
 
                 # Check if amount of unique channels in the BrdCst file is nothing unusual
                 if len(df_brc['ChannelCode'].unique()) < 50 or len(df_brc['ChannelCode'].unique()) > 75:
                     logging.info('Unusual amount of channels detected in the BrdCst file')
                     condition = False
-                else:
-                    logging.info('Nothing suspect in the amount of channels in BrdCst file')
 
             except NameError as e:
                 logging.info(f'A Dataframe was not defined, {e}')
@@ -417,8 +417,6 @@ class SensorInfosysExtract(BaseSensorOperator):
     def poke(self, context):
 
         # check if file from last friday was uploaded
-        # if yes download and return yes
-        # if no return false
         with self._create_hook() as hook:
 
             self.log.info('Checking if last fridays a Infosysextract was uploaded')
@@ -427,8 +425,8 @@ class SensorInfosysExtract(BaseSensorOperator):
 
             today = date.today()
             last_friday_upload = today - timedelta(days=3+5)
-            date_string = str(last_friday_upload.day) + '.' + str(last_friday_upload.month)\
-                          + '.' + str(last_friday_upload.year)
+            date_string = str(last_friday_upload.day) + '.' +\
+                          str(last_friday_upload.month) + '.' + str(last_friday_upload.year)
             server_path = f'marketshare ({date_string}).txt'
 
             try:

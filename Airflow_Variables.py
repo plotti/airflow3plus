@@ -1,9 +1,12 @@
 import datetime
+import getpass
 
 from datetime import datetime
 """
 This class is only used to synchronize variables which are used in multiple files and scripts
-Change the variables here to ensure global change of the respective parameter
+Change the variables here to ensure global change of the respective parameter.
+Also in this file are various list for reports and more.
+If you add a parameter, feel free to write a short description to it.
 
 local_path: Path to the local directory
 remote_path: Path to the remote directory on the FTP-server
@@ -13,6 +16,7 @@ steal_pot_path: Path to the heavy viewers excel sheet
 heatmap_path: Path to the Heatmap
 dropbox_path: Path to my dropbox
 flask_path: Path to the files for the flask application
+verify_path: Path to the solutions folder, where we can compare infosys values with facts values
 suffix: Current suffix of almost every file on the FTP-server
 
 ftp_conn_id: Current Id of the ftp connection on the airflow webserver
@@ -39,22 +43,27 @@ channels_of_interest: Channels which stand in direct competition to our products
 
 shows_lists: Lists of the most popular channels on each channel of our main group, movies and 
 one time events are excluded
+
+eps: List of Eps that are mainly looked at can be expanded if needed
+
+bad_channle_list: List of channels who do not provide a serious broadcast file, holes and incomplete
 """
+user = getpass.getuser()
 
 
 class AirflowVariables:
 
     def __init__(self):
-        self.local_path = '/home/floosli/Documents/PIN_Data/'
+        self.local_path = f'/home/{user}/Documents/PIN_Data/'
         self.remote_path = '/PIN-Daten/'
-        self.table_viewers_path = '/home/floosli/Documents/Tables_Channel_Viewers/'
-        self.vorwoche_path = '/home/floosli/Documents/Excel_VorwocheZuschauer/'
-        self.steal_pot_path = '/home/floosli/Documents/Heavy_Viewers_StealPot/'
-        self.heatmap_path = '/home/floosli/Documents/Heatmap/'
-        self.verify_path = '/home/floosli/Documents/PIN_Data/solutions/'
-        self.dropbox_path = '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/' \
+        self.table_viewers_path = f'/home/{user}/Documents/Tables_Channel_Viewers/'
+        self.vorwoche_path = f'/home/{user}/Documents/Excel_VorwocheZuschauer/'
+        self.steal_pot_path = f'/home/{user}/Documents/Heavy_Viewers_StealPot/'
+        self.heatmap_path = f'/home/{user}/Documents/Heatmap/'
+        self.verify_path = f'/home/{user}/Documents/PIN_Data/solutions/'
+        self.dropbox_path = f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/' \
                             'Projects/data/Processed_pin_data/'
-        self.flask_path = '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Flask_Application/'
+        self.flask_path = f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Flask_Application/'
         self.suffix = '.pin'
 
         self.sensor_in_past = 10
@@ -80,12 +89,15 @@ class AirflowVariables:
                                                               "NITRO CH", "ProSieben CH", "SRF 1", "SRF zwei",
                                                               "SRF info", "ZDF", "ARD", "Puls 8", "kabel eins CH",
                                                               "SAT.1 CH", "DMAX CH", 'ORF Eins', 'ORF 2']
+        # Incomplete, used in the Flask metric cards
+        self.eps = ['Der Bachelor', 'Die Bachelorette', 'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester']
 
         self.shows_3plus = [['Der Bachelor', '3+'], ['Die Bachelorette', '3+'],
                             ['Adieu Heimat - Schweizer wandern aus', '3+'], ['Hawaii Five-0', '3+'],
                             ['The Big Bang Theory', '3+'], ['Bumann, der Restauranttester', '3+'],
                             ['Bauer, ledig, sucht ...', '3+'], ['Navy CIS', '3+'], ['FBI', '3+'],
-                            ['Young Sheldon', '3+'], ['C.S.I. - Tatort Las Vegas', '3+']]
+                            ['Young Sheldon', '3+'], ['C.S.I. - Tatort Las Vegas', '3+'],
+                            ['Knallerfrauen', '3+']]
 
         self.shows_4plus = [['The Big Bang Theory', '4+'], ['Steel Buddies - Stahlharte Geschäfte', '4+'],
                             ['C.S.I. - Tatort Las Vegas', '4+'], ['Mein peinlicher Sex-Unfall', '4+'],
@@ -100,7 +112,7 @@ class AirflowVariables:
                             ['Notruf - Retter im Einsatz', '5+']]
 
         self.shows_6plus = [['Criminal Minds', '6+'], ['Navy CIS: L.A.', '6+'], ['Die Modellbauer - Das Duell', '6+'],
-                            ['Camping Paradiso Grandioso', '6+'],
+                            ['Camping Paradiso Grandioso', '6+'], ['Border Patrol New Zealand', '6+'],
                             ['Jung, wild & sexy - Baggern, saufen, Party machen', '6+'], ['Superstar', '6+'],
                             ['CSI: Cyber', '6+'], ['Die geheimen Akten der NASA', '6+'],
                             ['Flugzeug-Katastrophen', '6+']]
@@ -108,13 +120,14 @@ class AirflowVariables:
         self.shows_TV24 = [['Die Aquarium-Profis', 'TV24'], ['Border Control - Spaniens Grenzschützer', 'TV24'],
                            ['Timber Kings - Blockhaus-Paläste XXL', 'TV24'], ['Die Höhle der Löwen Schweiz', 'TV24'],
                            ['Airport Security: Colombia', 'TV24'], ['Navy CIS: L.A.', 'TV24'],
-                           ['Diesel Brothers', 'TV24'], ['Ninja Warrior Switzerland', 'TV24']]
+                           ['Diesel Brothers', 'TV24'], ['Ninja Warrior Switzerland', 'TV24'],
+                           ['S.W.A.T.', 'TV24']]
 
         self.shows_TV25 = [['King of Queens', 'TV25'], ['Pawn Stars - Die Drei vom Pfandhaus', 'TV25'],
                            ['CSI: Miami', 'TV25'], ['Die Nanny', 'TV25'], ['Die Simpsons', 'TV25'],
                            ['Auction Hunters - Zwei Asse machen Kasse', 'TV25'],
                            ['Criminal Minds', 'TV25'], ['The Good Doctor', 'TV25'],
-                           ['Mountain Life - Traumhaus gesucht', 'TV25']]
+                           ['Mountain Life - Traumhaus gesucht', 'TV25'], ['Suits', 'TV25']]
 
         self.shows_S1 = [['The First 48 - Am Tatort mit den US-Ermittlern', 'S1'],
                          ['Law & Order: Special Victims Unit', 'S1'],
@@ -123,7 +136,7 @@ class AirflowVariables:
                          ['Rick der Restaurator', 'S1'], ['Hard Time', 'S1'], ['Diggers - Die Schatzsucher', 'S1'],
                          ['Überleben!', 'S1'], ['Super-Fabriken', 'S1']]
 
-        self.bad_channels_list = ['WELT CH', 'Sport 1 CH']  # Insufficient broadcast file, lot of holes, Not used atm
+        self.bad_channels_list = ['WELT CH', 'Sport 1 CH']
 
 
 # ----------------------------------------------------------------------------------------------------------------------

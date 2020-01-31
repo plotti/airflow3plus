@@ -221,7 +221,7 @@ def send_mail(date, date_day_b4, date_week_b4, fname_day_b4, fname_week_b4):
     msg = MIMEMultipart()
     msg['Subject'] = f'[Vorwoche Zuschauer] Rt-T für {date},' \
                      f' berechnet mit Zuschauern von {date_day_b4} und {date_week_b4}'
-    recipients = ['hb@3plus.tv', 'floosli@3plus.tv', 'lhe@3plus.tv', 'sk@3plus.tv', 'tp@3plus.tv',
+    recipients = ['hb@3plus.tv', 'lhe@3plus.tv', 'sk@3plus.tv', 'tp@3plus.tv',
                   'plotti@gmx.net', 'kh@3plus.tv', 'ps@3plus.tv']
     msg['From'] = 'Harold Bessis <hb@3plus.tv>'
     msg['To'] = COMMASPACE.join(recipients)

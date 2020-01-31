@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 import os
 import Airflow_Variables
+import calendar
 
 from datetime import timedelta, datetime
 from collections import Counter
@@ -119,7 +120,11 @@ def get_older_facts_table(year):
 
 
 def get_dropbox_facts_table(year=None):
-
+    """
+    Get the facts table from dropbox
+    :param year: year of the wishing
+    :return: both tables
+    """
     try:
         date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
         if year is None:
@@ -131,8 +136,8 @@ def get_dropbox_facts_table(year=None):
         else:
             df_lv = pd.read_csv(DROPBOX_PATH + '%s0101_%s1231_Live_DE_15_49_mG.csv' % (year, year),
                                 parse_dates=date_cols,
-                                dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
-                                       'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
+                                dtype={'Description': str, 'H_P': str, 'Kanton': float, 'Title': str, 'Weights': float,
+                                       'broadcast_id': float, 'date': str, 'duration': float, 'program_duration': float,
                                        'station': str})
     except FileNotFoundError as e:
         print(f'Live facts table does not exist on dropbox or is saved at a different path as given')
@@ -144,17 +149,17 @@ def get_dropbox_facts_table(year=None):
         if year is None:
             df_tsv = pd.read_csv(DROPBOX_PATH + 'updated_tsv_facts_table.csv',
                                  parse_dates=delayed_date_cols,
-                                 dtype={'Description': str, 'H_P': str, 'HouseholdId': int, 'IndividualId': int,
-                                        'Kanton': int, 'Platform': int, 'StationId': int, 'Title': str, 'TvSet': int,
-                                        'Weights': float, 'UsageDate': int, 'ViewingActivity': int, 'age': int,
-                                        'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
+                                 dtype={'Description': str, 'H_P': str, 'HouseholdId': float, 'IndividualId': float,
+                                        'Kanton': float, 'Platform': float, 'StationId': int, 'Title': str, 'TvSet': float,
+                                        'Weights': float, 'UsageDate': float, 'ViewingActivity': float, 'age': float,
+                                        'broadcast_id': float, 'date': str, 'duration': float, 'program_duration': float,
                                         'station': str, 'RecordingDate': str})
         else:
             df_tsv = pd.read_csv(DROPBOX_PATH + '%s0101_%s1231_delayedviewing_DE_15_49_mG.csv' % (year, year),
                                  parse_dates=delayed_date_cols,
-                                 dtype={'Description': str, 'H_P': str, 'HouseholdId': int, 'IndividualId': int,
+                                 dtype={'Description': str, 'H_P': str, 'HouseholdId': float, 'IndividualId': int,
                                         'Kanton': int, 'Platform': int, 'StationId': int, 'Title': str, 'TvSet': int,
-                                        'Weights': float, 'UsageDate': int, 'ViewingActivity': int, 'age': int,
+                                        'Weights': float, 'UsageDate': int, 'ViewingActivity': int, 'age': float,
                                         'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
                                         'station': str, 'RecordingDate': str})
 
@@ -308,8 +313,7 @@ def get_brc(date):
     :return: pd.Dataframe of the broadcast schedule of the day
     """
     with open(f'{LOCAL_PATH}BrdCst/BrdCst_{date}.pin', 'r', encoding='latin-1') as f:
-        brc = pd.read_csv(f, dtype={'Date': 'object', 'StartTime': 'object',
-                                    'ChannelCode': 'int'})
+        brc = pd.read_csv(f, dtype={'Date': 'object', 'StartTime': 'object'}, error_bad_lines=False)
 
     # Padding time to 6 digits and to datetime
     brc['StartTime'] = brc['Date'] + brc['StartTime'].str.zfill(6)
@@ -584,6 +588,7 @@ def update_tsv_facts_table(dates):
             df_update = pd.concat([df_update, df_new], axis=0, ignore_index=False, sort=True)
 
         except FileNotFoundError as e:
+
             logging.info('%s did not found file for date %s, continue with next file' % (str(e), date))
             continue
 
@@ -592,6 +597,7 @@ def update_tsv_facts_table(dates):
     # Concatenate update with old file
 
     df_updated = pd.concat([df_old, df_update], axis=0, ignore_index=False, sort=True)
+
     df_updated['date'] = pd.to_numeric(df_updated['date'], downcast='integer')
     df_updated.to_csv(f'{LOCAL_PATH}{START}_{int(df_updated["date"].max())}_delayedviewing_DE_15_49_mG.csv',
                       index=False)
@@ -767,7 +773,7 @@ def imp_live_viewers(date, stations):
     lv = get_live_viewers(agemax=49, agemin=15, date=date.strftime("%Y%m%d"))
 
     lv["station"] = lv["StationId"].map(stations)
-    lv = lv[['StartTime', 'EndTime', 'H_P', 'Weights', 'station', 'Kanton']]  # TODO
+    lv = lv[['StartTime', 'EndTime', 'H_P', 'Weights', 'station', 'Kanton']]
     lv['Weights'] = lv['H_P'].map(get_weight_dict((date.strftime("%Y%m%d"))))
 
     return lv
@@ -781,7 +787,7 @@ def imp_live_brdcst_sched(date, stations):
     :return: pd.Dataframe of the schedule of the day
     """
     sched = get_brc(date.strftime("%Y%m%d"))
-    sched["station"] = sched["ChannelCode"].map(stations).astype(str)  # TODO
+    sched["station"] = sched["ChannelCode"].map(stations).astype(str)
     sched = sched[['Date', 'Title', 'StartTime', 'EndTime', 'BrdCstId', 'Description', 'Duration', 'station']]
 
     return sched
@@ -986,7 +992,6 @@ def infosys_comparison():
     df_lv['EndTime'] = pd.to_datetime(df_lv['EndTime'], errors='coerce')
 
     results = pd.DataFrame(data=None, index=None, columns=['Datum', 'Station', 'Live', 'Tsv', 'Rating'])
-    # test = pd.DataFrame(data=None, index=None, columns=['Start', 'End', 'Live', 'Tsv'])
     for date in infosys_val['Datum'].unique():
 
         zeitschiene = infosys_val[(infosys_val['Datum'] == date) & (infosys_val['Station'] == '3+')].copy()
@@ -1049,3 +1054,6 @@ def infosys_comparison():
     difference['Difference'] = difference['Rating_infosys'] - difference['Rating_facts_table']
     difference.to_csv(f'{SOL_PATH}comparison_infosys.csv')
     return difference['Difference'].sum()
+
+
+# ----------------------------------------------------------------------------------------------------------------------

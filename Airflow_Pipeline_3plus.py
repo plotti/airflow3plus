@@ -3,6 +3,7 @@ import json
 import os
 import hashlib
 import shutil
+import getpass
 
 import Sensors_3plus
 import Pin_Functions
@@ -92,6 +93,8 @@ SLACK_CONN_ID = Airflow_var.slack_conn_id
 # Time properties
 START = Airflow_var.start
 END_DAY = Airflow_var.end
+# current user
+user = getpass.getuser()
 """
 Continue development of this system.
 Structure of this DAG:
@@ -107,6 +110,9 @@ Read some Airflow examples.
 2. Add it to the schedule at the position you lie
 3. Load it into the airflow directory
 """
+
+# Careful when the year changes, the algorithm needs some help to get going -> manually initialize the table
+# might be a good idea
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -142,7 +148,6 @@ def fail_slack_alert(context):
     return failed_alert.execute(context=context)
 
 
-# Default arguments for the DAG dag_3plus
 default_args = {
     'owner': '3plus',
     'depends_on_past': False,
@@ -150,7 +155,7 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
 }
-# DAG Definition and various setting influencing the workflow of the DAG
+
 dag_3plus = DAG(dag_id=DAG_ID,
                 description='DAG used to automate the PIN data gathering of 3plus and to update modified files',
                 schedule_interval='0 8,20 * * 1-5',
@@ -168,8 +173,7 @@ dag_3plus = DAG(dag_id=DAG_ID,
 def extract_regular_dates():
     """
     Pull the xcom variables for the regular files from the database
-    Saves the pulled dates in a global variable
-    :return: None
+    :return: List of string dates in the database
     """
     puller = xcom.XCom
     regular_dates = []
@@ -197,8 +201,7 @@ def extract_regular_dates():
 def extract_irregular_dates():
     """
     Pull the xcom variables for the irregular files from the database
-    Saves the pulled dates in a global variable
-    :return: None
+    :return: Return list of booleans if the file has been updated
     """
     puller = xcom.XCom
     irregular_dates = []
@@ -275,7 +278,7 @@ def check_hash_of_new_files(regular_dates, irregular_dates):
     respective date from the list od dates to update. Before the execution of this function the files are stored at
     a temporary directory called temp and are moved to their assigned folder if they are determined
     as new  or updated.
-    :return: None
+    :return: List of string dates that really have been updated and changed
     """
     dates_to_update = set()
     for r_file, r_dates in zip(REGULAR_FILE_LIST, regular_dates):
@@ -344,6 +347,7 @@ def check_hash_of_new_files(regular_dates, irregular_dates):
 def detect_correct_dates():
     """
     Remove dates which did not get updated, compare the hashes of the files for this task
+    Push the dates that have been updated onto the database
     """
     pusher = xcom.XCom
     regular_dates = extract_regular_dates()
@@ -362,6 +366,7 @@ def update_facts_tables():
     """
     Data transformation and aggregation
     Updates both facts tables based on the remaining dates computed after the hashes has been compared
+    Safe the updated facts table in various places, locally, dropbox
     :return: None
     """
     pusher = xcom.XCom
@@ -403,8 +408,8 @@ def update_facts_tables():
             break
         if os.path.isfile(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_lv_old)):
             shutil.copy(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_lv_old),
-                        '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
-                        'updated_live_facts_table.csv')
+                        f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
+                        f'updated_live_facts_table.csv')
 
     for t in range(DAYS_IN_YEAR):
         date_tsv_old = (END - timedelta(days=t)).strftime('%Y%m%d')
@@ -412,8 +417,8 @@ def update_facts_tables():
             break
         if os.path.isfile(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_tsv_old)):
             shutil.copy(LOCAL_PATH + '%s_%s_delayedviewing_DE_15_49_mG.csv' % (START, date_tsv_old),
-                        '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
-                        'updated_tsv_facts_table.csv')
+                        f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
+                        f'updated_tsv_facts_table.csv')
 
     for date in dates:
         pusher.set(key='update', value=str(date), execution_date=datetime.now(timezone.utc),
@@ -546,6 +551,8 @@ Task_Update_Facts_Table = PythonOperator(
 # 4. Step
 # Delete all the xcom variables from the sqlite database
 # The deletion of the Xcom has to be done on the default DB for configuration or changing the db
+# Additionally, Sensor the validity of the facts table to a certain
+# degree and check some other assurances, ongoing work
 # Also, the existing DB and connections should be viewable in the Airflow-GUI.
 SensorInfosysExtract = Sensors_3plus.SensorInfosysExtract(
     task_id='Sensor_Infosys_Extract',
@@ -566,7 +573,7 @@ SensorValidity = Sensors_3plus.SensorVerifyFactsTables(
     timeout=600,
     soft_fail=False,
     mode='reschedule',
-    on_failure_callback=None,  # TODO fail_slack_alert
+    on_failure_callback=None,  # fail_slack_alert
     trigger_rule='all_done',
     do_xcom_push=True,
     dag=dag_3plus

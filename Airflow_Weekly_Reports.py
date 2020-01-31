@@ -2,10 +2,10 @@ import Airflow_Variables
 import Transformations_Weekly_Reports
 import Plotly_Graph_Heavy_Viewers
 import Plotly_Metrics_Eps
-import smtplib
 import logging
 import os
 import shutil
+import getpass
 
 from airflow.models import DAG, xcom
 from airflow.operators.python_operator import PythonOperator
@@ -14,9 +14,6 @@ from airflow.operators.sqlite_operator import SqliteOperator
 from airflow.contrib.operators.slack_webhook_operator import SlackWebhookOperator
 from datetime import datetime, timedelta, timezone
 
-from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
-from email.mime.text import MIMEText
 
 DAG_ID = 'dag_weekly_reports'
 Airflow_var = Airflow_Variables.AirflowVariables()
@@ -29,9 +26,12 @@ HEATMAP_PATH = Airflow_var.heatmap_path
 DAYS_IN_YEAR = Airflow_var.days_in_year
 START = Airflow_var.start
 END_DAY = Airflow_var.end
+EPS = Airflow_var.eps
+user = getpass.getuser()
 """
 This Dag is used to generate reports that are required weekly. Such as the Heatmap of zapping and 
-the HeavyViewersTool to optimize cross promotion.
+the HeavyViewersTool to optimize cross promotion. The computations are mainly made in the Transformation_Weekly_Reports
+file.
 """
 
 
@@ -68,7 +68,6 @@ def fail_slack_alert(context):
     return failed_alert.execute(context=context)
 
 
-# Default arguments for the DAG dag_3plus
 default_args = {
     'owner': '3plus',
     'depends_on_past': False,
@@ -76,7 +75,7 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
 }
-# DAG Definition and various setting influencing the workflow of the DAG
+
 dag_weekly_reports = DAG(dag_id=DAG_ID,
                          description='DAG to update the viewers table for shows',
                          schedule_interval='0 21 * * 2',
@@ -93,7 +92,8 @@ dag_weekly_reports = DAG(dag_id=DAG_ID,
 # ----------------------------------------------------------------------------------------------------------------------
 def update_heatmap_week():
     """
-    Update the heatmap for last week. Determine which are the new dates to be updated
+    Update the heatmap for last week. Determine which are the new dates to be updated.
+    Safe versions of the updated version in locally and on dropbox
     :return: None
     """
     recent_day = START
@@ -140,12 +140,12 @@ def update_heatmap_week():
 
     logging.info('Picklefile has been updated, can be uploaded from Dash')
     shutil.copy(HEATMAP_PATH + 'data_heatmap_chmedia.pkl',
-                '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/'
-                'P38 Zapping sequences clustering (Heatmaps & more)/data_heatmap_chmedia.pkl')
+                f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/'
+                f'P38 Zapping sequences clustering (Heatmaps & more)/data_heatmap_chmedia.pkl')
 
     shutil.copy(HEATMAP_PATH + 'data_heatmap_chmedia_threshold.pkl',
-                '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/'
-                'P38 Zapping sequences clustering (Heatmaps & more)/data_heatmap_chmedia_threshold.pkl')
+                f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/'
+                f'P38 Zapping sequences clustering (Heatmaps & more)/data_heatmap_chmedia_threshold.pkl')
 
 
 def xcom_push_oldest():
@@ -179,50 +179,29 @@ def create_heavy_viewer_report():
     logging.info('Created the excel file of all the values')
 
     Plotly_Graph_Heavy_Viewers.generate_plotly_table()
-    logging.info('Created the plotly table and saved it locally as .html file')
+    logging.info('Created the plotly table and saved it locally as .txt file')
 
 
-# TODO adjust show
 def create_metrics_eps():
     """
     Create the div for the plotly div of the EPs metrics
     """
-    Plotly_Metrics_Eps.generate_graphs_eps('Der Bachelor')
-    logging.info('Graphs for the metrics eps generated')
 
-    Plotly_Metrics_Eps.gather_metrics()
+    Plotly_Metrics_Eps.gather_stats(EPS)
+    for show in EPS:
+        Plotly_Metrics_Eps.generate_graphs_eps(show)
+    logging.info(f'Graphs and statstable generated')
 
+    Plotly_Metrics_Eps.generate_statstables_eps()
+    logging.info(f'Plotly tables generated')
 
-def send_mail_plotly_graph():
-    """
-    Send an html file of the plotly table to all recipients
-    :return: None
-    """
-    COMMASPACE = ', '
-    msg = MIMEMultipart()
-    msg['Subject'] = f'[HeavyViewersTool] Updated Version'
-    recipients = ['floosli@3plus.tv', 'hb@3plus.tv', 'LHE@3plus.tv', 'KH@3plus.tv', 'PS@3plus.tv', 'TP@3plus.tv',
-                  'KH@3plus.tv', 'plotti@gmx.net', 'Ute.vonMoers@chmedia.ch', 'roger.elsener@chmedia.ch',
-                  'Lola.Gimferrer@chmedia.ch', 'Salvatore.Ceravolo@chmedia.ch', 'SK@3plus.tv',
-                  'AH@3plus.tv', 'TH@3plus.tv', 'sva@3plus.tv', 'lschweigart@3plus.tv']
-    msg['From'] = 'Harold Bessis <hb@3plus.tv>'
-    msg['To'] = COMMASPACE.join(recipients)
-    body = f"Hallo Zusammen, \n\nIm Anhang findet Ihr das HeavyViewersTool mit den aktualisierten Werten,"
-    body += f"\n\nBeste Grüsse,\nHarold (automatic email)"
-    body = MIMEText(body)
-    msg.attach(body)
-
-    with open(HV_STEAL_PATH + 'HeavyViewersTool.html', 'rb') as f:
-        att = MIMEApplication(f.read(), Name='HeavyViewersTool.html')
-        msg.attach(att)
-
-    s = smtplib.SMTP('3plus-tv.mail.protection.outlook.com:25')
-    s.send_message(msg)
-    s.quit()
-    logging.info('The email has been sent, the receivers will be notified shortly')
+    Plotly_Metrics_Eps.create_audienceflow_div()
+    logging.info(f'Audienceflow of eps generated')
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+# The flow is pretty straight forward. First generate all the reports based on the updated dates, then save them
+# in various places and finally clean up a bit
 Task_Generate_Plotly_Tool = PythonOperator(
     task_id='HeavyViewersTool',
     provide_context=False,
@@ -233,31 +212,19 @@ Task_Generate_Plotly_Tool = PythonOperator(
     priority_weight=1,
     dag=dag_weekly_reports
 )
-"""
+
 Task_Generate_Plotly_Metrics = PythonOperator(
     task_id='Metrics_Eps',
     provide_context=False,
     python_callable=create_metrics_eps,
     retries=3,
     retry_delay=timedelta(minutes=1),
-    execution_timeout=timedelta(hours=1),
+    execution_timeout=timedelta(hours=2),
+    trigger_rule='all_done',
     priority_weight=1,
     dag=dag_weekly_reports
 )
 
-Task_Send_Mail = PythonOperator(
-    task_id='Send_Mail',
-    provide_context=False,
-    python_callable=send_mail_plotly_graph,
-    retries=1,
-    retry_delay=timedelta(minutes=3),
-    execution_timeout=timedelta(hours=1),
-    priority_weight=1,
-    trigger_rule='all_success',
-    on_failure_callback=fail_slack_alert,
-    dag=dag_weekly_reports
-)
-"""
 Task_Update_Heatmap = PythonOperator(
     task_id='Update_Heatmap',
     provide_context=False,
@@ -293,9 +260,8 @@ Task_Push_Oldest_Xcom = PythonOperator(
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Schedule of Tasks
-Task_Generate_Plotly_Tool
+Task_Generate_Plotly_Tool >> Task_Generate_Plotly_Metrics
 Task_Update_Heatmap >> Task_Delete_Xcom_Oldest >> Task_Push_Oldest_Xcom
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-

@@ -17,9 +17,13 @@ sone = var.shows_S1
 list_EPs = [['Der Bachelor', '3+: First Runs'], ['Die Bachelorette', '3+: First Runs'],
             ['Adieu Heimat - Schweizer wandern aus', '3+: First Runs'],
             ['Bumann, der Restauranttester', '3+: First Runs'], ['Bauer, ledig, sucht ...', '3+: First Runs']]
+"""
+Plotly functions to create the div.txt file of the heavy viewers table. Based on the previously computed Heavy 
+Viewers Table. Saved in various places specially in drobbox for the flask app
+"""
+# ----------------------------------------------------------------------------------------------------------------------
 
 
-# Define filter functions to create the display the various dataframes
 def filtering_channel(df, channel):
     df = df[df['channel'] == channel]
     return df
@@ -40,13 +44,10 @@ def filtering_max_values(df, channel, show, instances):
 
     df = df.T.nlargest(instances+1, columns=[0]).T
     return df.drop(df.columns[0], axis=1)
+# ----------------------------------------------------------------------------------------------------------------------
 
 
 def generate_plotly_table():
-    """
-    Generate a plotly table based on the computed excel matrix and save the html file locally for further usage
-    :return: None
-    """
 
     y = 1.02
     x = 0
@@ -79,7 +80,7 @@ def generate_plotly_table():
                                     "This table shows the 10 shows who share the most<br>"
                                     "viewers with the show Der Bachelor when it runs at<br>"
                                     "3+ during primetime. Let's have a look at the first<br>"
-                                    "number. This number means that 72.01 percentage of<br>"
+                                    "number. This number means that 67.83 percentage of<br>"
                                     "the Bachelor viewers also watched Die Bachelorette which<br>"
                                     "means that these two shows attract a lot of the same kind<br>"
                                     "of viewers. The following numbers present the same concept<br>"
@@ -157,17 +158,6 @@ def generate_plotly_table():
         )
         y -= 0.05
 
-    """dict(label='All Shows',
-         args=[{'header': {'values': list(df.columns), 'line_color': 'darkslategray'},
-                "cells": {'values': df.T.values,
-                          'height': 60}},
-               {'title': None,
-                'width': 8000,
-                'annotations': annotation_english}
-               ],
-         method="update"
-         ),"""
-
     show_list.append(go.layout.Updatemenu(
         type='dropdown',
         buttons=list([
@@ -177,6 +167,7 @@ def generate_plotly_table():
                                   'height': 0}},
                        {'title': '<b>Choose a show:</b>',
                         'width': 1950,
+                        'height': 900,
                         'annotations': annotation_english}
                        ],
                  method="update"
@@ -189,6 +180,7 @@ def generate_plotly_table():
                                  'height': 90}},
                        {'title': 'Example on 3+ airing Der Bachelor',
                         'width': 1950,
+                        'height': 900,
                         'annotations': annotation_example}
                        ],
                  method='update'
@@ -226,13 +218,13 @@ def generate_plotly_table():
         )
     )
 
-    # Add the layout and some annotations
-    fig.update_layout(updatemenus=show_list, dragmode='pan', width=1950, margin=dict(l=400),
+    fig.update_layout(updatemenus=show_list, dragmode='pan', width=1950, height=900, margin=dict(l=400),
                       title_text="<b>Choose a show:</b>",
                       annotations=annotation_english
                       )
 
-    plotly.offline.plot(fig, filename=PATH + 'HeavyViewersTool.html', auto_open=False, auto_play=False)
+    plotly.offline.plot(fig, filename=PATH + 'Heavy_Viewers/' + 'HeavyViewersTool.html',
+                        auto_open=False, auto_play=False)
 
     div = plotly.offline.plot(fig, show_link=False, output_type="div", include_plotlyjs=True)
 

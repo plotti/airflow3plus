@@ -8,6 +8,7 @@ from itertools import groupby
 import pickle
 import logging
 from datetime import timedelta
+import getpass
 """
 Function defined in this file are used to automize the process of detecting conflict of interest concerning
 heavy viewers of different shows. We try to diminish the competition of of our shows between each other, 
@@ -39,8 +40,9 @@ list_EPs = [['Der Bachelor', '3+: First Runs'], ['Die Bachelorette', '3+: First 
 name_EPs = ['Der Bachelor', 'Die Bachelorette', 'Adieu Heimat - Schweizer wandern aus',
             'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester']
 
-dates_EPs = pd.read_pickle('/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
-                           'Projects/P38 Zapping sequences clustering (Heatmaps & more)/epdates_.pkl')
+user = getpass.getuser()
+dates_EPs = pd.read_pickle(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
+                           f'Projects/P38 Zapping sequences clustering (Heatmaps & more)/epdates_.pkl')
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -104,16 +106,10 @@ def compute_heavy_viewers(df):
     :param df: Dataframe of which we want to compute the heavy viewers, should be prefiltered
     :return: A list of the indexes for the viewers contributing the most to the rating of the show
     """
-    ranked_viewers_ah = (df.groupby('H_P')['duration_weighted'].sum().sort_values(ascending=False).index.tolist())
 
-    vals = []
-    tot = df['duration_weighted'].sum()
-    for n_viewers in range(len(ranked_viewers_ah)):
-        vals.append(df[(df['H_P'].isin(ranked_viewers_ah[:n_viewers]))]['duration_weighted'].sum() / tot)
-
-    heavy_viewers = (df.groupby('H_P')['duration_weighted'].sum()
-                     .sort_values(ascending=False)[:int(len(vals)*0.4)]
-                     .index.tolist())
+    show_df_sorted = df.groupby('H_P')['duration_weighted'].sum().sort_values(ascending=False)
+    show_df_sorted = show_df_sorted / show_df_sorted.sum()
+    heavy_viewers = show_df_sorted[show_df_sorted.cumsum() <= 0.9].index.to_list()
 
     return heavy_viewers
 
