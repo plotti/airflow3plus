@@ -1,6 +1,6 @@
 import datetime
 import pandas as pd
-import Pin_Functions
+import Generel_Pin_Functions
 import Airflow_Variables
 import logging
 import smtplib
@@ -15,16 +15,9 @@ from datetime import timedelta, datetime
 Airflow_var = Airflow_Variables.AirflowVariables()
 # Some global variables
 VORWOCHE_PATH = Airflow_var.vorwoche_path
-DAYS_IN_YEAR = Airflow_var.days_in_year
-ADJUST_YEAR = Airflow_var.adjust_year
 TABLES_PATH = Airflow_var.table_viewers_path
 CHANNELS = Airflow_var.relevant_channels
 CHANNELS_OF_INTEREST = Airflow_var.channels_of_interest
-YEAR = Airflow_var.year
-MONTH = Airflow_var.month
-DAY = Airflow_var.day
-START = Airflow_var.start
-END = Airflow_var.end
 """
 The functions defined in this filed are used to transform the facts tables and generate useful reports 
 for various departments in the CH Media group.
@@ -47,8 +40,7 @@ def compute_viewers_of_channel(channel, dates):
     """
     dates = list(dates)
 
-    facts_lv = Pin_Functions.get_live_facts_table()[0]
-    facts_ovn = Pin_Functions.get_tsv_facts_table()[0]
+    facts_lv, facts_ovn = Generel_Pin_Functions.get_dropbox_facts_table(None, table_type=None)
 
     if facts_ovn.empty or facts_lv.empty:
         logging.info('A facts table is empty please check for correct paths, unable to update, will exit')
@@ -70,10 +62,10 @@ def compute_viewers_of_channel(channel, dates):
     df_lv['weighted_duration'] = df_lv['duration'] * df_lv['Weights']
 
     # Filter for updated tsv facts
-    df_ovn = df_ovn.drop(columns=['Title', 'Description', 'HouseholdId', 'IndividualId', 'Kanton', 'Platform',
-                                  'RecordingDate', 'RecordingEndTime', 'RecordingStartTime', 'StationId',
-                                  'TvSet', 'UsageDate', 'ViewingActivity', 'ViewingStartTime', 'ViewingTime',
-                                  'age', 'show_endtime', 'show_starttime'])
+    df_ovn = df_ovn.drop(columns=['Title', 'Description', 'Kanton', 'Gender',
+                                  'RecordingDate', 'RecordingEndTime', 'RecordingStartTime',
+                                  'ViewingStartTime', 'ViewingTime', 'Channel_StartTime', 'Channel_EndTime',
+                                  'Age', 'show_endtime', 'show_starttime'])
     df_ovn = df_ovn[df_ovn['date'].isin(dates)]
     df_ovn = df_ovn[df_ovn['station'] == channel]
     df_ovn = df_ovn[df_ovn['program_duration'] >= 600]
@@ -92,31 +84,6 @@ def compute_viewers_of_channel(channel, dates):
     else:
         new_table = pd.concat([org_table, table_hv], axis=0, join='outer', sort=False)
         new_table.to_pickle(TABLES_PATH + 'table_viewers_pik_{}'.format(channel))
-
-
-def compute_complete_viewers_table():
-    """
-    Compute the viewers who watch a show and save the weighted duration of every instance in a pickle file
-    :return: None
-    """
-    end = str(YEAR) + str(MONTH) + str(DAY)
-    if ADJUST_YEAR < 0:
-        end = str(YEAR) + '1231'
-
-    date = datetime.strptime(START, '%Y%m%d')
-    dates = set()
-
-    for i in range(DAYS_IN_YEAR):
-        add = date.strftime('%Y%m%d')
-        if add == end:
-            dates.update({int(add)})
-            break
-        dates.update([int(add)])
-        date = date + timedelta(days=1)
-
-    for channel in CHANNELS:
-        compute_viewers_of_channel(channel, dates)
-        logging.info('end of %s' % channel)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -222,7 +189,7 @@ def send_mail(date, date_day_b4, date_week_b4, fname_day_b4, fname_week_b4):
     msg['Subject'] = f'[Vorwoche Zuschauer] Rt-T für {date},' \
                      f' berechnet mit Zuschauern von {date_day_b4} und {date_week_b4}'
     recipients = ['hb@3plus.tv', 'lhe@3plus.tv', 'sk@3plus.tv', 'tp@3plus.tv',
-                  'plotti@gmx.net', 'kh@3plus.tv', 'ps@3plus.tv']
+                  'plotti@gmx.net', 'kh@3plus.tv', 'ps@3plus.tv', 'floosli@3plus.tv']
     msg['From'] = 'Harold Bessis <hb@3plus.tv>'
     msg['To'] = COMMASPACE.join(recipients)
     body = f"Hallo Zusammen, \n\nIm Anhang findet Ihr die Rt-T für die Programme vom {date}," \
@@ -252,7 +219,7 @@ def compute_zuschauer_vorwoche(df, date):
     df = df[(df['show_starttime'].dt.hour.isin([18, 19, 20, 21, 22, 23])) & (df['program_duration'] > 600)
             & (df['station'].isin(CHANNELS_OF_INTEREST))]
     df['broadcast_id'] = df['broadcast_id'].astype(int)
-    df = Pin_Functions.add_individual_ratings(df)
+    df = Generel_Pin_Functions.add_individual_ratings(df)
     df['Date'] = df['show_starttime'].dt.date
 
     logging.info('Creating the zuschauer vorwoche report for %s' % date)
@@ -326,11 +293,12 @@ def compute_zuschauer_vorwoche(df, date):
     to_xl_multi_sheet(day_b4, filename_day_b4, CHANNELS)
     to_xl_multi_sheet(week_b4, filename_week_b4, CHANNELS)
 
-    send_mail(*(map(lambda x: x.strftime(date_format), [date, day_before, week_before])),
-              filename_day_b4, filename_week_b4)
-
-    os.remove(filename_day_b4)
-    os.remove(filename_week_b4)
-
+    day_remove = (date + timedelta(days=-7))
+    week_remove = (date + timedelta(days=-14))
+    try:
+        os.remove(VORWOCHE_PATH + filename + day_remove.strftime(date_format) + '.xlsx')
+        os.remove(VORWOCHE_PATH + filename + week_remove.strftime(date_format) + '.xlsx')
+    except FileNotFoundError:
+        pass
 
 # ----------------------------------------------------------------------------------------------------------------------

@@ -1,13 +1,14 @@
 import pandas as pd
-import Pin_Functions
+import Generel_Pin_Functions as gpf
+import Live_Facts_Table
+import Pin_Utils
 import Airflow_Variables
 import itertools
 import numpy as np
 import datetime
 from itertools import groupby
 import pickle
-import logging
-from datetime import timedelta
+from datetime import timedelta, date
 import getpass
 """
 Function defined in this file are used to automize the process of detecting conflict of interest concerning
@@ -37,18 +38,16 @@ list_EPs = [['Der Bachelor', '3+: First Runs'], ['Die Bachelorette', '3+: First 
             ['Adieu Heimat - Schweizer wandern aus', '3+: First Runs'],
             ['Bumann, der Restauranttester', '3+: First Runs'], ['Bauer, ledig, sucht ...', '3+: First Runs']]
 
-name_EPs = ['Der Bachelor', 'Die Bachelorette', 'Adieu Heimat - Schweizer wandern aus',
-            'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester']
+name_EPs = ['Der Bachelor', 'Die Bachelorette', 'Adieu Heimat Schweizer wandern aus',
+            'Bauer, ledig, sucht ...', 'Bumann der Restauranttester']
 
 user = getpass.getuser()
-dates_EPs = pd.read_pickle(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
-                           f'Projects/P38 Zapping sequences clustering (Heatmaps & more)/epdates_.pkl')
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Create the HeavyViewers stealing potential excel sheet and generate the plotly table
 # ----------------------------------------------------------------------------------------------------------------------
-def filter_for_channel(df, channel, start_hour=20, end_hour=23, date=None, min_duration=60):
+def filter_for_channel(df, channel, start_hour=20, end_hour=23, dates=None, min_duration=60):
     """
     Filter for various options to specify a show and timeframe
     :param df: Dataframe to filter from
@@ -56,7 +55,7 @@ def filter_for_channel(df, channel, start_hour=20, end_hour=23, date=None, min_d
     :param start_hour: Integer of the earliest time to filter for [0,24]
     :param end_hour: Integer of the latest time to filter for, range [0,24]
     :param min_duration: Integer of seconds minimum watched of a show by the viewer, to reduce noice
-    :param date: datetime.date in format YYYYmmdd
+    :param dates: datetime.date in format YYYYmmdd
     :return: Dataframe filtered on every given aspect
     """
     df_filtered = (df[(df['station'] == channel)
@@ -65,20 +64,21 @@ def filter_for_channel(df, channel, start_hour=20, end_hour=23, date=None, min_d
                    & (df['duration'] > min_duration)]
                    .groupby(['Description', 'H_P', 'Title', 'date'])['duration_weighted'].sum()).\
         to_frame().reset_index()
-    if date is not None:
-        df_filtered = df_filtered[df_filtered['date'].isin(date)]
+    if dates is not None:
+        df_filtered = df_filtered[df_filtered['date'].isin(dates)]
     return df_filtered
 
 
 def filter_for_show(df, title, first_run=False):
 
     if title in name_EPs and first_run:
-        dates = dates_EPs.get(title)
+        dates_eps = pd.read_csv('/home/floosli/Documents/EP_dates/ep_dates.csv', parse_dates=['date'], index_col=[0])
+        dates = dates_eps[(dates_eps['Title'] == title) and (dates_eps['First_Run'] == 'NEU_Algo')]['date'].unique()
         trans_date = list()
-        for date in dates:
-            ts = pd.to_datetime(str(date))
-            date = ts.strftime('%Y%d%m')
-            trans_date.append(date)
+        for day in dates:
+            ts = pd.to_datetime(str(day))
+            day = ts.strftime('%Y%d%m')
+            trans_date.append(day)
         df = df[df['date'].isin(trans_date)]
         df_show = df[df['Title'] == title]
     else:
@@ -132,31 +132,32 @@ def analyse_heavy_viewers():
     Compute the potential of stealing heavy viewers from each other
     :return: None
     """
-    df_20_lv = Pin_Functions.get_live_facts_table()[0]
-    df_20_lv = Pin_Functions.add_individual_ratings(df_20_lv)
+    df_20_lv = gpf.get_dropbox_facts_table(year=None, table_type='live')[0]
+    df_20_lv = gpf.add_individual_ratings(df_20_lv)
 
-    df_19_lv = Pin_Functions.get_older_facts_table(year=2019)[0]
-    df_19_lv = Pin_Functions.add_individual_ratings(df_19_lv)
+    df_19_lv = gpf.get_dropbox_facts_table(year=2019, table_type='live')[0]
+    df_19_lv = gpf.add_individual_ratings(df_19_lv)
 
-    df_18_lv = Pin_Functions.get_older_facts_table(year=2018)[0]
-    df_18_lv = Pin_Functions.add_individual_ratings(df_18_lv)
+    df_18_lv = gpf.get_dropbox_facts_table(year=2018, table_type='live')[0]
+    df_18_lv = gpf.add_individual_ratings(df_18_lv)
 
     df_lv = pd.concat([df_20_lv, df_19_lv, df_18_lv], axis=0)
     df_lv = df_lv.rename(columns={'individual_Rt-T_live': 'individual_Rt-T'})
+
     del df_18_lv
     del df_19_lv
     del df_20_lv
 
-    df_20_tsv = Pin_Functions.get_tsv_facts_table()[0]
-    df_20_tsv = Pin_Functions.add_individual_ratings_ovn(df_20_tsv)
+    df_20_tsv = gpf.get_dropbox_facts_table(year=None, table_type='tsv')[1]
+    df_20_tsv = gpf.add_individual_ratings_ovn(df_20_tsv)
 
-    df_19_tsv = Pin_Functions.get_older_facts_table(year=2019)[1]
-    df_19_tsv = Pin_Functions.add_individual_ratings_ovn(df_19_tsv)
+    df_19_tsv = gpf.get_dropbox_facts_table(year=2019, table_type='tsv')[1]
+    df_19_tsv = gpf.add_individual_ratings_ovn(df_19_tsv)
 
-    df_18_tsv = Pin_Functions.get_older_facts_table(year=2018)[1]
-    df_18_tsv = Pin_Functions.add_individual_ratings_ovn(df_18_tsv)
+    df_18_tsv = gpf.get_dropbox_facts_table(year=2018, table_type='tsv')[1]
+    df_18_tsv = gpf.add_individual_ratings_ovn(df_18_tsv)
 
-    df_tsv = pd.concat([df_20_tsv, df_19_tsv, df_18_tsv], axis=0)
+    df_tsv = pd.concat([df_20_tsv, df_19_tsv, df_18_tsv], axis=0, sort=True)
     df_tsv = df_tsv.rename(columns={'RecordingEndTime': 'EndTime',
                                     'RecordingStartTime': 'StartTime',
                                     'individual_Rt-T_tsv': 'individual_Rt-T'})
@@ -184,17 +185,19 @@ def analyse_heavy_viewers():
     list_list_shows.extend(tvtwentyfive)
     list_list_shows.extend(sone)
 
+    dates_eps = pd.read_csv('/home/floosli/Documents/EP_dates/ep_dates.csv', parse_dates=['date'], index_col=[0])
+
     channel_df_dict = {}
     for channel in CHANNELS:
         if channel == '3+: First Runs':
             trans_date = list()
             for title in name_EPs:
-                dates = dates_EPs.get(title)
-                for date in dates:
-                    ts = pd.to_datetime(str(date))
-                    date = ts.strftime('%Y%d%m')
-                    trans_date.append(date)
-            df_temp = filter_for_channel(df, '3+', date=trans_date)
+                dates = dates_eps[dates_eps['Title'] == title]['date'].unique()
+                for day in dates:
+                    ts = pd.to_datetime(str(day))
+                    day = ts.strftime('%Y%d%m')
+                    trans_date.append(day)
+            df_temp = filter_for_channel(df, '3+', dates=trans_date)
         else:
             df_temp = filter_for_channel(df, channel)
         channel_df_dict.update({channel: df_temp})
@@ -274,6 +277,28 @@ def analyse_heavy_viewers():
 # ----------------------------------------------------------------------------------------------------------------------
 # Update the Heatmap for the Dash application
 # ----------------------------------------------------------------------------------------------------------------------
+def generate_epdates_pickle():
+
+    dates_dict = dict()
+    shows = ['Der Bachelor', 'Die Bachelorette', 'Bumann der Restauranttester', 'Bauer, ledig, sucht ...',
+             'Adieu Heimat Schweizer wandern aus', 'Notruf', 'Die Höhle der Löwen Schweiz', 'Ninja Warrior Switzerland']
+
+    for show in shows:
+        dates = pd.read_csv(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/'
+                            f'Home production dates/ep_dates.csv')
+        dates = dates[dates['Title'] == show]
+        times = list()
+        dates = dates['date']
+        for row in range(len(dates.index)):
+            temp = dates.iloc[row]
+            time = date(int(temp[0:4]), int(temp[5:7]), int(temp[8:10]))
+            times.append(time)
+        dates_dict[show] = times
+
+    with open(DROPBOX_PATH + 'Heatmap/ep_dates_scrapped.pkl', 'wb') as handle:
+        pickle.dump(dates_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def get_live_zapping(df_usagelive_df, start_time, end_time, date):
     """
     Get the zapping from the viewers.
@@ -283,7 +308,7 @@ def get_live_zapping(df_usagelive_df, start_time, end_time, date):
     :param date: Day of the observation
     :return: Dataframe of the zapping
     """
-    station_dict = Pin_Functions.get_station_dict()
+    station_dict = Pin_Utils.get_station_dict()
 
     df_usagelive = df_usagelive_df.copy()
     ud = df_usagelive['UsageDate'].iloc[0]
@@ -365,7 +390,7 @@ def update_heatmap(date, threshold_duration=False):
     ends = ['190000', '200000', '210000', '220000', '230000', '235900']
     timeslots = ['18', '19', '20', '21', '22', '23']
 
-    liv = Pin_Functions.get_live_viewers(date=date,  agemin=15, agemax=49)
+    liv = Live_Facts_Table.get_live_viewers(date=date,  agemin=15, agemax=49)
     if threshold_duration:
         liv = liv[liv['EndTime'] - liv['StartTime'] > timedelta(seconds=30)]
 
@@ -415,51 +440,6 @@ def update_heatmap(date, threshold_duration=False):
 
         with open(DROPBOX_PATH + 'Heatmap/' + 'data_heatmap_chmedia.pkl', 'wb') as f:
             pickle.dump(data_new_heatmap, f)
-
-
-def compute_heatmap_whole_year():
-    """
-    Recompute the heatmap for the whole year and saves it as a pickle file
-    :return: None
-    """
-    with open(HEATMAP_PATH + 'data_heatmap_chmedia_threshold.pkl', 'wb') as f:
-        pickle.dump({}, f)
-
-    cond = False
-
-    end = str(YEAR) + str(MONTH) + str(DAY)
-    start = str(YEAR) + '0101'
-    if ADJUST_YEAR < 0:
-        end = str(YEAR) + '1231'
-
-    date = datetime.datetime.strptime(start, '%Y%m%d')
-
-    logging.info('Will update from date %s' % date)
-    while True:
-        logging.info('Updating still ongoing from date %s' % date)
-
-        for i in range(7):
-            add = date.strftime('%Y%m%d')
-            if add == end:
-                cond = True
-                try:
-                    update_heatmap(add, threshold_duration=False)
-                except FileNotFoundError as e:
-                    logging.info(str(e))
-                    date = date + timedelta(days=1)
-                    break
-            try:
-                update_heatmap(add, threshold_duration=False)
-            except FileNotFoundError as e:
-                logging.info(str(e))
-                cond = True
-                date = date + timedelta(days=1)
-                break
-            date = date + timedelta(days=1)
-
-        if cond:
-            logging.info("Reached the end date successfully, finished live table")
-            break
 
 
 # ----------------------------------------------------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import re
 import json
 import ftplib
 import logging
-import Pin_Functions
+import Verification_Facts_Tables as Vft
 import pandas as pd
 
 from datetime import datetime, timedelta, timezone, date
@@ -76,15 +76,16 @@ class SensorRegularFiles(BaseSensorOperator):
 
                 for i in range(self.days_past):
 
-                    date = (datetime.today() - timedelta(days=(self.days_past - i))).strftime('%Y%m%d')
-                    server_full_path = self.server_path + name + '_' + date + self.suffix
-                    local_full_path = self.local_path + name + '/' + name + '_' + date + self.suffix
+                    reg_date = (datetime.today() - timedelta(days=(self.days_past - i))).strftime('%Y%m%d')
+                    server_full_path = self.server_path + name + '_' + reg_date + self.suffix
+                    local_full_path = self.local_path + name + '/' + name + '_' + reg_date + self.suffix
 
                     try:
                         server_mod_time = hook.get_mod_time(server_full_path)
 
                         if not os.path.isfile(local_full_path):
-                            pusher.set(key=name + '_date', value=str(date), execution_date=datetime.now(timezone.utc),
+                            pusher.set(key=name + '_date', value=str(reg_date),
+                                       execution_date=datetime.now(timezone.utc),
                                        task_id='date_push', dag_id='dag_3plus')
                             self.log.info('New file found: %s', name)
                             update = True
@@ -92,7 +93,8 @@ class SensorRegularFiles(BaseSensorOperator):
 
                         present_mod = datetime.fromtimestamp(os.path.getmtime(local_full_path))
                         if present_mod < server_mod_time:
-                            pusher.set(key=name + '_date', value=str(date), execution_date=datetime.now(timezone.utc),
+                            pusher.set(key=name + '_date', value=str(reg_date),
+                                       execution_date=datetime.now(timezone.utc),
                                        task_id='date_push', dag_id='dag_3plus')
                             self.log.info('Update found for %s', name)
                             update = True
@@ -321,8 +323,7 @@ class SensorVerifyFactsTables(BaseSensorOperator):
 
         # Check if all channels have a rating above 0 which should be the case
         # and otherwise an indicator that something is wrong
-        zero_threshold, channels = Pin_Functions.compute_rating_per_channel(dropbox_path +
-                                                                            'updated_live_facts_table.csv')
+        zero_threshold, channels = Vft.compute_rating_per_channel(dropbox_path + 'updated_live_facts_table.csv')
         if not zero_threshold:
             logging.info('Some Channels have a rating of 0, more precisely: %s' % channels)
         else:
@@ -330,7 +331,8 @@ class SensorVerifyFactsTables(BaseSensorOperator):
 
         # Check the facts table rating values TODO
         try:
-            results = Pin_Functions.infosys_comparison()
+            # results = vft.infosys_comparison()
+            results = 13
         except ValueError as e:
             logging.info(str(e))
             results = 13
@@ -339,7 +341,7 @@ class SensorVerifyFactsTables(BaseSensorOperator):
             logging.info('if the result is exactly 13 the computation could not be loaded')
         else:
             logging.info('The computed rating of our facts table are in the range of correctness')
-            logging.info('Difference' % results)
+            logging.info('Difference %s' % results)
 
         try:
             with open(f'{local_path}Crit.pin', 'r', encoding='latin-1') as f:
@@ -384,8 +386,8 @@ class SensorVerifyFactsTables(BaseSensorOperator):
                 condition = False
 
         # Check if there are the same amount of files of each kind
-        if (len(next(os.walk(local_path + 'SocDem/'))[2]) != len(next(os.walk(local_path + 'Weight/'))[2])) or\
-                (len(next(os.walk(local_path + 'BrdCst/'))[2]) != len(next(os.walk(local_path + 'UsageLive/'))[2])):
+        if (len(next(os.walk(local_path + 'SocDem/'))[2]) != len(next(os.walk(local_path + 'Weight/'))[2])) or (
+                len(next(os.walk(local_path + 'BrdCst/'))[2]) != len(next(os.walk(local_path + 'UsageLive/'))[2])):
             logging.info('There is not the same amount of each type of file present')
             condition = False
         else:
@@ -425,8 +427,8 @@ class SensorInfosysExtract(BaseSensorOperator):
 
             today = date.today()
             last_friday_upload = today - timedelta(days=3+5)
-            date_string = str(last_friday_upload.day) + '.' +\
-                          str(last_friday_upload.month) + '.' + str(last_friday_upload.year)
+            date_string = str(last_friday_upload.day) + '.' + str(
+                last_friday_upload.month) + '.' + str(last_friday_upload.year)
             server_path = f'marketshare ({date_string}).txt'
 
             try:

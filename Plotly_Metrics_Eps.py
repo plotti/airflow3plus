@@ -8,10 +8,11 @@ import numpy as np
 import calendar
 import getpass
 import logging
+import shutil
 
 from Airflow_Variables import AirflowVariables
 from datetime import datetime, timedelta, time
-from Ongoing_work.Live_Facts_Table import get_gender_dict, get_age_dict
+from Pin_Utils import get_gender_dict, get_age_dict
 
 
 user = getpass.getuser()
@@ -60,21 +61,19 @@ def load_dates_eps(show):
     :param show: String of show title
     :return: list of datetimes
     """
-    ep_dates = pd.read_pickle(
-        f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Home production dates/epdates_.pkl')
+    dates = pd.read_csv(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/'
+                        f'Home production dates/ep_dates.csv')
 
-    ep_dates['Bauer, ledig, sucht ...'] = ep_dates.pop('Bauer, ledig, sucht...')
+    dates = dates[(dates['Title'] == show) & (dates['channel'].isin(['3+', 'TV24']))]
 
-    ep_dates = list(ep_dates[show])
+    if show not in ['Bauer, ledig, sucht ...', 'Bumann, der Restauranttester',
+                    'Adieu Heimat Schweizer wandern aus', 'Notruf']:
+        dates = dates[dates['First_Run'].isin(['NEU', 'NEU_Algo'])]
+    if show in ['Bumann, der Restauranttester', 'Bauer, ledig, sucht ...']:
+        dates = dates[(dates['channel'] == '3+') & (dates['time'].isin(['20:15:00', '20:14:00']))]
+    dates['date'] = dates['date'].str.replace('-', '')
 
-    dates = list()
-    for dt in ep_dates:
-        ts = (dt - np.datetime64('1970-01-01T00:00:00Z')) / np.timedelta64(1, 's')
-        ts = datetime.utcfromtimestamp(ts)
-        ts = ts.strftime('%Y%m%d')
-        dates.append(ts)
-
-    return dates
+    return dates['date'].tolist()
 
 
 def load_data():
@@ -83,58 +82,70 @@ def load_data():
     :return: Concatenated dataframe of 3 years
     """
     date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
+    df_20 = pd.read_csv(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
+                        f'Projects/data/Processed_pin_data/updated_live_facts_table.csv',
+                        parse_dates=date_cols,
+                        dtype={'Description': str, 'H_P': str, 'Title': str, 'Weights': float,
+                               'date': str, 'duration': float, 'program_duration': int,
+                               'station': str},
+                        usecols=['station', 'Title', 'date', 'duration', 'Weights', 'program_duration',
+                                 'show_endtime', 'show_starttime', 'StartTime', 'EndTime', 'H_P', 'Description'])
+    df_20 = add_individual_ratings(df_20)
+
+    date_cols = ['show_endtime', 'show_starttime', 'StartTime', 'EndTime']
     df_19 = pd.read_csv(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
                         f'Projects/data/Processed_pin_data/20190101_20191231_Live_DE_15_49_mG.csv',
                         parse_dates=date_cols,
-                        dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
-                               'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
-                               'station': str})
+                        dtype={'Description': str, 'H_P': str, 'Title': str, 'Weights': float,
+                               'date': str, 'duration': float, 'program_duration': int,
+                               'station': str},
+                        usecols=['station', 'Title', 'date', 'duration', 'Weights', 'program_duration',
+                                 'show_endtime', 'show_starttime', 'StartTime', 'EndTime', 'H_P', 'Description']
+                        )
     df_19 = add_individual_ratings(df_19)
 
     df_18 = pd.read_csv(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
                         f'Projects/data/Processed_pin_data/20180101_20181231_Live_DE_15_49_mG.csv',
                         parse_dates=date_cols,
-                        dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
-                               'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
-                               'station': str})
+                        dtype={'Description': str, 'H_P': str, 'Title': str, 'Weights': float,
+                               'date': str, 'duration': float, 'program_duration': int,
+                               'station': str},
+                        usecols=['station', 'Title', 'date', 'duration', 'Weights', 'program_duration',
+                                 'show_endtime', 'show_starttime', 'StartTime', 'EndTime', 'H_P', 'Description']
+                        )
     df_18 = add_individual_ratings(df_18)
 
     df_17 = pd.read_csv(f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/'
                         f'Projects/data/Processed_pin_data/20170101_20171231_Live_DE_15_49_mG.csv',
                         parse_dates=date_cols,
-                        dtype={'Description': str, 'H_P': str, 'Kanton': int, 'Title': str, 'Weights': float,
-                               'broadcast_id': int, 'date': str, 'duration': float, 'program_duration': int,
-                               'station': str})
+                        dtype={'Description': str, 'H_P': str, 'Title': str, 'Weights': float,
+                               'date': str, 'duration': float, 'program_duration': int,
+                               'station': str},
+                        usecols=['station', 'Title', 'date', 'duration', 'Weights', 'program_duration',
+                                 'show_endtime', 'show_starttime', 'StartTime', 'EndTime', 'H_P', 'Description']
+                        )
     df_17 = add_individual_ratings(df_17)
 
-    df = pd.concat([df_19, df_18, df_17])
-    del df_19, df_18, df_17
+    df = pd.concat([df_20, df_19, df_18, df_17])
+    del df_20, df_19, df_18, df_17
 
     return df
 
 
-def process_pin_data(date_ep, episode_start_time, show, df):
+def process_pin_data(date_ep, episode_start_time, show, df_2019_live):
     """
     Preprocessing of the given data
     :param date_ep: List of the dates, string format
     :param episode_start_time: List of the start_times, datetime format
     :param show: String of the show title
-    :param df: dataframe of interest
+    :param df_2019_live: dataframe of interest
     :return: Processed dataframe
     """
-    df_2019_live = df
+    if show not in ['Ninja Warrior Switzerland', 'Die Höhle der Löwen Schweiz']:
+        df_2019_live = df_2019_live[(df_2019_live['date'].isin([date_ep]))].sort_values(by='show_starttime')
+    else:
+        df_2019_live = df_2019_live[(df_2019_live['date'].isin([date_ep]))].sort_values(by='show_starttime')
 
-    df_2019_live['Date'] = df_2019_live['show_starttime'].dt.date
-    df_2019_live['Date'] = pd.to_datetime(df_2019_live['Date'], format='%Y-%m-%d')
-    df_2019_live['Weekday'] = df_2019_live['Date'].dt.weekday.apply(lambda x: calendar.day_abbr[x])
-    df_2019_live['Week_number'] = df_2019_live['Date'].dt.week
-    df_2019_live['year'] = df_2019_live['Date'].dt.year
-    df_2019_live['week_identifier'] = df_2019_live['year'].astype('str') + "_" + df_2019_live['Week_number'].astype(
-        'str')
-
-    # Define Show
-    df_2019_live = df_2019_live[(df_2019_live['station'] == '3+') & (df_2019_live['date'].isin([date_ep]))].sort_values(
-        by='show_starttime')
     heavy_viewers = df_2019_live[(df_2019_live['Title'] == show)].groupby('H_P')[
         'Live_Rating'].sum().sort_values(ascending=False).index.tolist()
 
@@ -204,8 +215,20 @@ def generate_graphs_eps(show):
     :return: None
     """
     df = load_data()
+    df['Date'] = df['show_starttime'].dt.date
+    df['Date'] = pd.to_datetime(df['Date'], format='%Y-%m-%d')
+    df['Weekday'] = df['Date'].dt.weekday.apply(lambda x: calendar.day_abbr[x])
+    df['Week_number'] = df['Date'].dt.week
+    df['year'] = df['Date'].dt.year
+    df['week_identifier'] = df['year'].astype('str') + "_" + df['Week_number'].astype('str')
 
-    dates = load_dates_eps(show)[-3:]
+    # Define Show
+    if show not in ['Ninja Warrior Switzerland', 'Die Höhle der Löwen Schweiz']:
+        df = df[(df['station'] == '3+')].sort_values(by='show_starttime')
+    else:
+        df = df[(df['station'] == 'TV24')].sort_values(by='show_starttime')
+
+    dates = load_dates_eps(show)[:3]
     colors = ['rgb(49,130,189)', 'rgb(115,115, 189)', 'rgb(189,189,189)']
 
     fig = go.Figure()
@@ -228,6 +251,7 @@ def generate_graphs_eps(show):
                                  line=dict(color=f'{colors[i]}')
                                  )
                       )
+
         buttons.append(dict(label=f'{date}',
                             method='update',
                             args=[{'visible': [visibility(now, date) for now in dates]}]
@@ -239,23 +263,18 @@ def generate_graphs_eps(show):
                           title_text='Time',
                           title_font={"size": 15},
                           title_standoff=15,
-                          showgrid=True,
-                          showline=True,
-                          zeroline=True,
                           ticks='outside',
                           tickformat='%H:%M',
                           tickangle=90,
-                          nticks=10
+                          nticks=10,
                       ),
                       yaxis=dict(
                           title_text='Rating',
                           title_font={'size': 15},
                           title_standoff=15,
-                          showgrid=True,
-                          showline=True,
-                          zeroline=True,
                           ticks='outside',
-                          range=[0, 100]
+                          range=[0, 100],
+                          nticks=10
                       ),
                       legend=dict(
                           font_size=14,
@@ -274,7 +293,11 @@ def generate_graphs_eps(show):
     with open(f'{PATH}Metrics/Zeitschiene/plotly_timeband_{show}.txt', 'w') as f:
         f.write(div)
 
+    shutil.copy(f'{PATH}Metrics/Zeitschiene/plotly_timeband_{show}.txt',
+                f'/home/floosli/PycharmProjects/Flask_App/metric_app/static/zeitschiene/plotly_timeband_{show}.txt')
 
+
+# Compute Stats
 # ----------------------------------------------------------------------------------------------------------------------
 def compute_hv_produced_ratings(df, show, episode_1, episode_2):
     """
@@ -316,18 +339,29 @@ def gather_stats(eps):
 
         dates = load_dates_eps(show)
 
-        df_filt_ep = df_lv[(df_lv['program_duration'] > 600) & (df_lv['station'] == '3+') &
-                           (df_lv['date'].isin(dates)) & (df_lv['Title'] == show)]
+        if show in ['Ninja Warrior Switzerland', 'Die Höhle der Löwen Schweiz',
+                    'Sing meinen Song - Das Schweizer Tauschkonzert']:
+            df_filt_ep = df_lv[(df_lv['program_duration'] > 600) & (df_lv['station'] == 'TV24') &
+                               (df_lv['date'].isin(dates)) & (df_lv['Title'] == show)]
+        else:
+            df_filt_ep = df_lv[(df_lv['program_duration'] > 600) & (df_lv['station'] == '3+') &
+                               (df_lv['date'].isin(dates)) & (df_lv['Title'] == show)]
+
         f = {'Live_Rating': 'sum', 'date': 'first'}
-        df_filt_ep['Gender'] = df_filt_ep['H_P'].map(get_gender_dict(dates[0]))
-        df_filt_ep['age'] = df_filt_ep['H_P'].map(get_age_dict(dates[0]))
+
+        try:
+            df_filt_ep['Gender'] = df_filt_ep['H_P'].map(get_gender_dict(dates[0]))
+            df_filt_ep['Age'] = df_filt_ep['H_P'].map(get_age_dict(dates[0]))
+        except FileNotFoundError:
+            df_filt_ep['Gender'] = df_filt_ep['H_P'].map(get_gender_dict(dates[1]))
+            df_filt_ep['Age'] = df_filt_ep['H_P'].map(get_age_dict(dates[1]))
 
         df_ep = df_filt_ep.groupby(['Description'])['Live_Rating', 'date'].agg(f)
 
         df_ep = df_ep.reset_index(drop=False)
         df_ep = df_ep.round(2)
 
-        if show != 'Bumann, der Restauranttester':
+        if show not in ['Bumann, der Restauranttester', 'Ninja Warrior Switzerland', 'Die Höhle der Löwen Schweiz']:
             df_ep['Season'] = df_ep['Description'].str.extract(r'(Staffel\s[0-9]*)')
             df_ep['Episode'] = df_ep['Description'].str.extract(r'(Folge\s[0-9][0-9])')
         else:
@@ -347,25 +381,29 @@ def gather_stats(eps):
 
             gender.append(df_temp[df_temp['Gender'] == 'Frauen']['Weights'].sum() / (df_temp['Weights'].sum()))
 
-            temp = df_temp.groupby(['H_P'])['age'].first()
+            temp = df_temp.groupby(['H_P'])['Age'].first()
             age.append(temp.mean())
             del temp
 
             sec_watched.append(df_temp['duration'].mean())
 
-            # How did the viewers stick during and after adds, ongoing work
+            # Stickyness with derivatives
             unique_starts = df_temp['show_starttime'].unique()
             times_dict = {x: y[0] for x, y in zip(unique_starts, enumerate(unique_starts))}
             df_temp['Sequ'] = df_temp['show_starttime'].map(times_dict)
             perc = list()
             for i, value in enumerate(unique_starts):
-                try:
-                    seq0 = set(df_temp[df_temp['Sequ'] == i]['H_P'].unique())
-                    seq1 = set(df_temp[df_temp['Sequ'] == i + 1]['H_P'].unique())
-                    inter = seq0.intersection(seq1)
-                    perc.append(round((len(inter) / len(seq0)), 2))
-                except IndexError as e:
-                    continue
+                temp = df_temp
+                temp['Present'] = ((temp['EndTime'].clip(upper=value + pd.Timedelta(seconds=60)) - temp[
+                    'StartTime'].clip(lower=value)).dt.total_seconds() * temp['Weights']) / 60
+                rt_after_ad = temp[temp['Present'] > 0]['Present'].sum()
+                temp['Present_after'] = ((temp['EndTime'].clip(upper=value + pd.Timedelta(seconds=360)) - temp[
+                    'StartTime'].clip(lower=value + pd.Timedelta(seconds=300))).dt.total_seconds() * temp[
+                                             'Weights']) / 60
+                rt_after_fivemin = temp[temp['Present_after'] > 0]['Present_after'].sum()
+                perc.append(round((rt_after_fivemin - rt_after_ad) / 60, 2))
+                if i == 4:
+                    break
             stickyness.append(str([x for x in perc if x != 0]))
 
         viewers = pd.DataFrame(viewers, columns=['#viewers']).reset_index(drop=True)
@@ -379,9 +417,9 @@ def gather_stats(eps):
         episodes = df_filt_ep['Description'].unique()
         del df_temp, df_filt_ep
 
-        # Loyality, did the heavy viewers stick for the next episode, ongoing work
+        # Loyality, did the heavy viewers stick for the next episode, ongoing work TODO
         loyalty = list()
-        if show != 'Bumann, der Restauranttester':
+        if show not in ['Bumann, der Restauranttester', 'Ninja Warrior Switzerland', 'Die Höhle der Löwen Schweiz']:
 
             for i, episode_present in enumerate(episodes, 1):
 
@@ -412,8 +450,10 @@ def gather_stats(eps):
                        'women percentage', 'avg. age', 'avg. seconds', 'Stickyness', 'Loyality']]
 
         if show == 'Bauer, ledig, sucht ...':
-            seasons = ['Staffel 4', 'Staffel 6', 'Staffel 7', 'Staffel 8', 'Staffel 9']
+            seasons = ['Staffel 1', 'Staffel 2', 'Staffel 3', 'Staffel 4',
+                       'Staffel 5', 'Staffel 6', 'Staffel 7', 'Staffel 8', 'Staffel 9']
             df_ep = df_ep[~df_ep['Season'].isin(seasons)]
+        df_ep = df_ep[df_ep['Season'] != ""]
 
         df_ep.to_excel(writer, sheet_name=show)
         worksheet = writer.sheets[show]
@@ -436,22 +476,20 @@ def generate_statstables_eps():
 
     annotation_loyality = [dict(text="<b>Description of Loyality metric</b><br>"
                                      "<br>"
-                                     "This metric shows the percentage,<br>"
-                                     "the heavy viewers from<br>"
+                                     "This metric shows the percentage"
+                                     "of Rating, the heavy viewers from<br>"
                                      "last weeks episode produced<br>"
-                                     "this week. The other stats should<br>"
-                                     "be self-explanatory, feel free<br>"
-                                     "to contact the Data Science Team<br>"
+                                     "this week.<br>"
+                                     "Feel free to contact the"
+                                     "Data Science Team<br>"
                                      "if you have any questions<br>"
                                      "<br><br>"
                                      "<b>Description of Stickyness metric</b><br>"
                                      "<br>"
-                                     "This metric shows the percentage of<br>"
-                                     "of viewers that came back after an<br>"
-                                     "ad-break from the previous part.<br>"
-                                     "Every number is the relation between<br>"
-                                     "two consequtive parts of the show<br>"
-                                     "and the advertisement between them<br>",
+                                     "This metric shows velocity<br>"
+                                     "of viewers coming back after an<br>"
+                                     "ad-break. Every number is the <br>"
+                                     "value after one ad-break",
                                      showarrow=False, x=x, xref='paper',
                                      y=y - 0.9, yref="paper",
                                      align="left", xanchor='right')]
@@ -462,6 +500,7 @@ def generate_statstables_eps():
 
         df = pd.read_excel(PATH + 'Metrics/plotly_stats.xlsx', sheet_name=show, header=0)
         df = df.drop(columns=['Unnamed: 0']).reset_index(drop=True)
+        df = df.dropna()
 
         filter_list.append(dict(label=f'{show}',
                                 method='update',
@@ -503,7 +542,7 @@ def generate_statstables_eps():
             yanchor='top',
             )
         )
-        y -= 0.1
+        y -= 0.06
 
     fig = go.Figure()
 
@@ -535,7 +574,11 @@ def generate_statstables_eps():
     with open(PATH + 'Metrics/plotly_table_div.txt', 'w') as f:
         f.write(div)
 
+    shutil.copy(PATH + 'Metrics/plotly_table_div.txt',
+                '/home/floosli/PycharmProjects/Flask_App/metric_app/static/plotly_table_div.txt')
 
+
+# Generate audienceflow
 # ----------------------------------------------------------------------------------------------------------------------
 def compute_dataframe(channels):
     """
@@ -543,14 +586,17 @@ def compute_dataframe(channels):
     :param channels: list of channels
     :return: filtered dataframe
     """
-    dc = ['StartTime', 'EndTime', 'show_starttime', 'show_endtime', 'date']
+    dc = ['StartTime', 'EndTime', 'date']
     db_path = '/home/floosli/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
 
-    df_2018 = pd.read_csv(db_path + '20180101_20181231_Live_DE_15_49_mG.csv', parse_dates=dc)
-    df_2019 = pd.read_csv(db_path + '20190101_20191231_Live_DE_15_49_mG.csv', parse_dates=dc)
-    df = pd.concat([df_2018, df_2019], axis=0)
+    df_2018 = pd.read_csv(db_path + '20180101_20181231_Live_DE_15_49_mG.csv', parse_dates=dc,
+                          usecols=['Weights', 'duration', 'program_duration', 'date', 'station',
+                                   'Title', 'H_P', 'StartTime', 'EndTime'])
+    df_2019 = pd.read_csv(db_path + '20190101_20191231_Live_DE_15_49_mG.csv', parse_dates=dc,
+                          usecols=['Weights', 'duration', 'program_duration', 'date', 'station',
+                                   'Title', 'H_P', 'StartTime', 'EndTime'])
 
-    df['Viewing'] = 'Live'
+    df = pd.concat([df_2018, df_2019], axis=0)
 
     df['Weighted_duration'] = df['Weights'] * df['duration']
     df['Rt-T'] = df['Weighted_duration'] / df['program_duration']
@@ -654,6 +700,9 @@ def generate_audienceflow_map(df, channels, show):
 
     with open(f'{PATH}Metrics/Audienceflow/plotly_flow_{show}.txt', 'w') as f:
         f.write(div)
+
+    shutil.copy(f'{PATH}Metrics/Audienceflow/plotly_flow_{show}.txt',
+                f'/home/floosli/PycharmProjects/Flask_App/metric_app/static/plotly_flow_{show}.txt')
 
 
 def create_audienceflow_div():

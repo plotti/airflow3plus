@@ -2,6 +2,7 @@ import plotly.graph_objects as go
 import plotly.offline
 import pandas as pd
 import Airflow_Variables
+import shutil
 
 var = Airflow_Variables.AirflowVariables()
 
@@ -230,3 +231,6 @@ def generate_plotly_table():
 
     with open(PATH + 'Heavy_Viewers/hv_tool_div.txt', 'w') as f:
         f.write(div)
+
+    shutil.copy(PATH + 'Heavy_Viewers/hv_tool_div.txt',
+                f'/home/floosli/PycharmProjects/Flask_App/metric_app/static/hv_tool_div.txt')

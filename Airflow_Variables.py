@@ -69,7 +69,7 @@ class AirflowVariables:
         self.sensor_in_past = 10
         self.days_in_year = 365
         self.days_tsv = 8
-        self.adjust_year = 0
+        self.adjust_year = 0  # Input negative number, difference until the desired year
         self.year = datetime.now().year + self.adjust_year
         self.month = datetime.now().month
         self.day = datetime.now().day
@@ -80,24 +80,26 @@ class AirflowVariables:
         self.sql_alchemy_conn = 'sql_alchemy_conn'
         self.slack_conn_id = 'slack'
         self.infosys_ftp_conn_id = 'infosys_conn'
+        self.ch_media_ftp = 'chmedia_conn'
 
         self.regular_file_list = ['BrdCst', 'SocDem', 'UsageLive', 'UsageTimeShifted', 'Weight']
         self.irregular_file_list = ['Station', 'CritCode', 'Crit']
 
-        self.relevant_channels = ['3+', '4+', '5+', '6+', 'TV24', 'TV25', 'S1']
-        self.channels_of_interest = self.relevant_channels + ["RTL CH", "RTL II CH", "VOX CH", "SUPER RTL CH",
+        self.relevant_channels = ['3+', 'TV24', '4+', '5+', 'TV25', 'S1', '6+']
+        self.channels_of_interest = self.relevant_channels + ["RTL CH", "RTLZWEI CH", "VOX CH", "SUPER RTL CH",
                                                               "NITRO CH", "ProSieben CH", "SRF 1", "SRF zwei",
                                                               "SRF info", "ZDF", "ARD", "Puls 8", "kabel eins CH",
                                                               "SAT.1 CH", "DMAX CH", 'ORF Eins', 'ORF 2']
-        # Incomplete, used in the Flask metric cards
-        self.eps = ['Der Bachelor', 'Die Bachelorette', 'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester']
+        # Used particulary in the Flask metric cards
+        self.eps = ['Der Bachelor', 'Die Bachelorette', 'Bauer, ledig, sucht ...', 'Bumann, der Restauranttester',
+                    'Ninja Warrior Switzerland', 'Die Höhle der Löwen Schweiz']
 
         self.shows_3plus = [['Der Bachelor', '3+'], ['Die Bachelorette', '3+'],
                             ['Adieu Heimat - Schweizer wandern aus', '3+'], ['Hawaii Five-0', '3+'],
                             ['The Big Bang Theory', '3+'], ['Bumann, der Restauranttester', '3+'],
                             ['Bauer, ledig, sucht ...', '3+'], ['Navy CIS', '3+'], ['FBI', '3+'],
                             ['Young Sheldon', '3+'], ['C.S.I. - Tatort Las Vegas', '3+'],
-                            ['Knallerfrauen', '3+']]
+                            ['Knallerfrauen', '3+'], ['The Voice of Switzerland', '3+']]
 
         self.shows_4plus = [['The Big Bang Theory', '4+'], ['Steel Buddies - Stahlharte Geschäfte', '4+'],
                             ['C.S.I. - Tatort Las Vegas', '4+'], ['Mein peinlicher Sex-Unfall', '4+'],
@@ -121,7 +123,7 @@ class AirflowVariables:
                            ['Timber Kings - Blockhaus-Paläste XXL', 'TV24'], ['Die Höhle der Löwen Schweiz', 'TV24'],
                            ['Airport Security: Colombia', 'TV24'], ['Navy CIS: L.A.', 'TV24'],
                            ['Diesel Brothers', 'TV24'], ['Ninja Warrior Switzerland', 'TV24'],
-                           ['S.W.A.T.', 'TV24']]
+                           ['S.W.A.T.', 'TV24'], ['Sing meinen Song - Das Schweizer Tauschkonzert', 'TV24']]
 
         self.shows_TV25 = [['King of Queens', 'TV25'], ['Pawn Stars - Die Drei vom Pfandhaus', 'TV25'],
                            ['CSI: Miami', 'TV25'], ['Die Nanny', 'TV25'], ['Die Simpsons', 'TV25'],

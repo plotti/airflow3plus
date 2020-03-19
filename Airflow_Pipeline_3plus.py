@@ -4,10 +4,12 @@ import os
 import hashlib
 import shutil
 import getpass
+import calendar
 
 import Sensors_3plus
-import Pin_Functions
 import Airflow_Variables
+import Live_Facts_Table
+import TSV_Facts_Table
 
 from datetime import datetime, timedelta, timezone
 from shutil import copyfile
@@ -24,7 +26,7 @@ Used airflow version for development 1.10.5
 A scheduling system based on the Airflow library. We'd like to update locally saved files daily and
 generate enriched reports and tables based on the new entries.
 The 3plus_dag is the defined DAG in which all the task are unraveled and scheduled.
-Most Python_functions used in the PythonOperators are defined in the accompanied file Pin_Functions.py
+Most Python_functions used in the PythonOperators are defined in the accompanied file Live/TSV_Facts_Table.py
 for clearer maintainability add additional functions in the previously mentioned file or create new ones.
 
 Install airflow:
@@ -93,6 +95,8 @@ SLACK_CONN_ID = Airflow_var.slack_conn_id
 # Time properties
 START = Airflow_var.start
 END_DAY = Airflow_var.end
+ADJUST_YEAR = Airflow_var.adjust_year
+TSV_DAYS = Airflow_var.days_tsv
 # current user
 user = getpass.getuser()
 """
@@ -396,11 +400,41 @@ def update_facts_tables():
                        task_id='date_update', dag_id='dag_3plus')
             break
 
+    # logic of new years change problem
+    if datetime.now().month == 1:
+        year = datetime.now().year
+        start = str(year) + '0101'
+        end = str(year) + '1231'
+        adjust_year = -1
+        days_in_year = calendar.isleap(year-1)
+
+        part_dates = set()
+        temp = set()
+
+        for date in dates:
+            date = str(date)
+            if int(date[0:4]) == (year-1):
+                part_dates.update({date})
+            else:
+                temp.update({date})
+        dates = temp
+
+        if len(part_dates) != 0:
+            Live_Facts_Table.update_live_facts_table(part_dates, end_day=end, adjust_year=adjust_year,
+                                                     days_in_year=days_in_year, start_day=start)
+
+            logging.info('Continuing with updating time-shifted facts-table')
+            TSV_Facts_Table.update_tsv_facts_table(part_dates, end_day=end, start_day=start, adjust_year=adjust_year,
+                                                   days_in_year=days_in_year, tsv_days=TSV_DAYS)
+            logging.info('The year is finished copy the new version on to dropbox')
+
     logging.info('Starting with updating live facts-table')
-    Pin_Functions.update_live_facts_table(dates)
+    Live_Facts_Table.update_live_facts_table(dates, end_day=END_DAY, adjust_year=ADJUST_YEAR,
+                                             days_in_year=DAYS_IN_YEAR, start_day=START)
 
     logging.info('Continuing with updating time-shifted facts-table')
-    Pin_Functions.update_tsv_facts_table(dates)
+    TSV_Facts_Table.update_tsv_facts_table(dates, end_day=END_DAY, start_day=START, adjust_year=ADJUST_YEAR,
+                                           days_in_year=DAYS_IN_YEAR, tsv_days=TSV_DAYS)
 
     for s in range(DAYS_IN_YEAR):
         date_lv_old = (END - timedelta(days=s)).strftime('%Y%m%d')
@@ -410,6 +444,9 @@ def update_facts_tables():
             shutil.copy(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_lv_old),
                         f'/home/{user}/Dropbox (3 Plus TV Network AG)/3plus_ds_team/Projects/data/Processed_pin_data/'
                         f'updated_live_facts_table.csv')
+            shutil.copy(LOCAL_PATH + '%s_%s_Live_DE_15_49_mG.csv' % (START, date_lv_old),
+                        f'/home/floosli/PycharmProjects/Flask_App/metric_app/static/'
+                        f'facts_table/updated_live_facts_table.csv')
 
     for t in range(DAYS_IN_YEAR):
         date_tsv_old = (END - timedelta(days=t)).strftime('%Y%m%d')
@@ -421,6 +458,7 @@ def update_facts_tables():
                         f'updated_tsv_facts_table.csv')
 
     for date in dates:
+        logging.info(f'pushed {date} for update')
         pusher.set(key='update', value=str(date), execution_date=datetime.now(timezone.utc),
                    task_id='date_update', dag_id='dag_3plus')
 

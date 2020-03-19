@@ -1,5 +1,5 @@
 import Sensors_3plus
-import Pin_Functions
+import Generel_Pin_Functions
 import Airflow_Variables
 import Transformations_Daily_Report
 import json
@@ -75,7 +75,7 @@ default_args = {
 }
 
 dag_daily_reports = DAG(dag_id=DAG_ID,
-                        description='DAG to update the viewers table for shows',
+                        description='DAG to create reports required daily',
                         schedule_interval='0 10,22 * * 1-5',
                         start_date=datetime(year=2019, month=10, day=15, hour=14),
                         end_date=None,
@@ -125,7 +125,7 @@ def create_vorwoche_zuschauer():
     One xcom variable should be pushed onto the db to get all days which are new
     :return: None
     """
-    df = Pin_Functions.get_live_facts_table()[0]
+    df = Generel_Pin_Functions.get_dropbox_facts_table(year=None, table_type='live')[0]
 
     recent_day = START
     END = datetime.strptime(END_DAY, '%Y%m%d')
